@@ -1,0 +1,51 @@
+EC2,Elastic Compute Cloud: virtual servers in the cloud
+S3,Simple Storage Service: object storage for files and data
+RDS,Relational Database Service: managed SQL databases
+Lambda,Serverless compute that runs code in response to events
+VPC,Virtual Private Cloud: isolated network environment in AWS
+IAM,Identity and Access Management: user and permission control
+CloudWatch,Monitoring and logging service
+CloudFormation,Infrastructure as Code (IaC) tool to define resources
+Route 53,AWS DNS and domain management service
+CloudFront,Content delivery network (CDN)
+Elastic Beanstalk,Platform-as-a-Service to deploy applications quickly
+EBS,Elastic Block Store: persistent volume storage for EC2
+Auto Scaling,Automatically adjust the number of EC2 instances
+ELB,Elastic Load Balancer: distributes traffic across resources
+SNS,Simple Notification Service: pub/sub messaging and alerts
+SQS,Simple Queue Service: message queuing for decoupling components
+DynamoDB,Fully managed NoSQL database
+CloudTrail,Tracks API calls and activity logs for auditing
+ECS,Elastic Container Service: run and manage Docker containers
+EKS,Elastic Kubernetes Service: managed Kubernetes
+Fargate,Serverless compute engine for containers
+Secrets Manager,Stores and rotates secrets like API keys and passwords
+KMS,Key Management Service: manage encryption keys
+Aurora,High-performance managed relational database
+Athena,Query service to analyze data in S3 using SQL
+Glue,ETL service for data preparation
+Redshift,Fully managed data warehouse service
+CodeCommit,Git-based source control service
+CodePipeline,CI/CD orchestration service
+CodeBuild,Build service for compiling and testing code
+CodeDeploy,Automates deployment of applications
+Step Functions,Serverless workflow orchestration
+Elasticache,In-memory cache using Redis or Memcached
+Inspector,Security assessment service for EC2 instances
+Shield,DDoS protection for AWS applications
+WAF,Web Application Firewall: protects against common attacks
+Lightsail,Simplified hosting for small apps and websites
+Outposts,Brings AWS services to your on-premises environment
+Organizations,Manage multiple AWS accounts centrally
+Control Tower,Set up and govern secure multi-account AWS environments
+Quicksight,Business intelligence and data visualization tool
+S3 Glacier,Long-term archival storage in S3
+Budget,Set cost limits and receive alerts
+Cost Explorer,Analyze AWS spending and usage patterns
+Trusted Advisor,Checks AWS environment for best practices
+Elastic IP,Static IPv4 address for dynamic cloud computing
+EFS,Elastic File System: shared file storage for Linux
+Batch,Run large-scale parallel and high-performance computing jobs
+Timestream,Time series database for IoT and operational data
+AppSync,GraphQL API service for real-time apps
+Amplify,Framework to build and deploy full-stack web/mobile apps

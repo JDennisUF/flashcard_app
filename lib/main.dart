@@ -1,33 +1,31 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
+import 'dart:convert';
+import 'package:csv/csv.dart';
+import 'models/flashcard.dart';
+import 'models/flashcard_set.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
+  Hive.registerAdapter(FlashcardAdapter());
+  Hive.registerAdapter(FlashcardSetAdapter());
+  await Hive.openBox<FlashcardSet>('flashcardSets');
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Flashcards',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.purpleAccent),
       ),
       home: const MyHomePage(title: 'Flashcards!'),
@@ -37,86 +35,556 @@ class MyApp extends StatelessWidget {
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
   final String title;
-
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateMixin {
+  late Box<FlashcardSet> _flashcardSetBox;
+  List<FlashcardSet> _flashcardSets = [];
+  int _currentSetIndex = 0;
+  int _currentIndex = 0;
+  bool _showAnswer = false;
+  late AnimationController _controller;
+  late Animation<double> _animation;
+  bool _randomOrder = false;
+  List<int> _shuffledIndices = [];
+  Set<int> _seenIndices = {};
 
-  void _incrementCounter() {
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    );
+    _animation = Tween<double>(begin: 0, end: 1).animate(_controller);
+    _flashcardSetBox = Hive.box<FlashcardSet>('flashcardSets');
+    if (_flashcardSetBox.isEmpty) {
+      // Add initial data if box is empty
+      _flashcardSetBox.addAll([
+        FlashcardSet(
+          name: 'General Knowledge',
+          cards: [
+            Flashcard(question: 'What is the capital of France?', answer: 'Paris'),
+            Flashcard(question: 'What is 2 + 2?', answer: '4'),
+            Flashcard(question: 'What is the largest planet?', answer: 'Jupiter'),
+          ],
+        ),
+        FlashcardSet(
+          name: 'Science',
+          cards: [
+            Flashcard(question: 'What is H2O?', answer: 'Water'),
+            Flashcard(question: 'What planet is known as the Red Planet?', answer: 'Mars'),
+          ],
+        ),
+      ]);
+    }
+    _flashcardSets = _flashcardSetBox.values.toList();
+  }
+
+  Future<void> _refreshSets({bool selectLast = false}) async {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _flashcardSets = _flashcardSetBox.values.toList();
+      if (selectLast && _flashcardSets.isNotEmpty) {
+        _currentSetIndex = _flashcardSets.length - 1;
+        _currentIndex = 0;
+        _showAnswer = false;
+        _controller.reset();
+      }
+    });
+  }
+
+  void _shuffleCards() {
+    final count = _flashcardSets[_currentSetIndex].cards.length;
+    _shuffledIndices = List.generate(count, (i) => i)..shuffle();
+    _currentIndex = 0;
+    _seenIndices.clear();
+  }
+
+  void _onSetChanged(int newIndex) {
+    setState(() {
+      _currentSetIndex = newIndex;
+      _currentIndex = 0;
+      _showAnswer = false;
+      _controller.reset();
+      if (_randomOrder) {
+        _shuffleCards();
+      } else {
+        _shuffledIndices.clear();
+        _seenIndices.clear();
+      }
+    });
+  }
+
+  void _onRandomOrderChanged(bool value) {
+    setState(() {
+      _randomOrder = value;
+      if (_randomOrder) {
+        _shuffleCards();
+      } else {
+        _shuffledIndices.clear();
+        _seenIndices.clear();
+        _currentIndex = 0;
+      }
+      _showAnswer = false;
+      _controller.reset();
+    });
+  }
+
+  void _flipCard() {
+    if (_showAnswer) {
+      _controller.reverse();
+    } else {
+      _controller.forward();
+    }
+    setState(() {
+      _showAnswer = !_showAnswer;
+    });
+  }
+
+  void _nextCard() {
+    setState(() {
+      if (_randomOrder) {
+        _seenIndices.add(_shuffledIndices[_currentIndex]);
+        if (_currentIndex < _shuffledIndices.length - 1) {
+          _currentIndex++;
+        }
+        _showAnswer = false;
+        _controller.reset();
+      } else {
+        final cards = _flashcardSets[_currentSetIndex].cards;
+        _currentIndex = (_currentIndex + 1) % cards.length;
+        _showAnswer = false;
+        _controller.reset();
+      }
+    });
+  }
+
+  void _previousCard() {
+    setState(() {
+      if (_currentIndex > 0) {
+        _currentIndex--;
+        _showAnswer = false;
+        _controller.reset();
+      }
+    });
+  }
+
+  void _restartCards() {
+    setState(() {
+      if (_randomOrder) {
+        _shuffleCards();
+      } else {
+        _currentIndex = 0;
+      }
+      _showAnswer = false;
+      _controller.reset();
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    final currentSet = _flashcardSets[_currentSetIndex];
+    final int displayIndex = _randomOrder && _shuffledIndices.isNotEmpty
+        ? _shuffledIndices[_currentIndex]
+        : _currentIndex;
+    final flashcard = currentSet.cards[displayIndex];
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                DropdownButton<int>(
+                  value: _currentSetIndex,
+                  items: List.generate(_flashcardSets.length, (index) {
+                    return DropdownMenuItem(
+                      value: index,
+                      child: Text(_flashcardSets[index].name),
+                    );
+                  }),
+                  onChanged: (int? newIndex) {
+                    if (newIndex != null) {
+                      _onSetChanged(newIndex);
+                    }
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  tooltip: 'New Set',
+                  onPressed: () async {
+                    await showDialog(
+                      context: context,
+                      builder: (context) => _NewSetDialog(onSave: (FlashcardSet newSet) async {
+                        await _flashcardSetBox.add(newSet);
+                        await _refreshSets(selectLast: true);
+                      }),
+                    );
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.upload_file),
+                  tooltip: 'Import Set from CSV',
+                  onPressed: () async {
+                    String? setName = '';
+                    List<Flashcard> importedCards = [];
+                    await showDialog(
+                      context: context,
+                      builder: (context) {
+                        final nameController = TextEditingController();
+                        return AlertDialog(
+                          title: const Text('Import Flashcard Set from CSV'),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TextField(
+                                controller: nameController,
+                                decoration: const InputDecoration(labelText: 'Set Name'),
+                                onChanged: (value) => setName = value,
+                              ),
+                              const SizedBox(height: 16),
+                              ElevatedButton.icon(
+                                icon: const Icon(Icons.file_open),
+                                label: const Text('Select CSV File'),
+                                onPressed: () async {
+                                  FilePickerResult? result = await FilePicker.platform.pickFiles(
+                                    type: FileType.custom,
+                                    allowedExtensions: ['csv'],
+                                    withData: kIsWeb, // Ensures bytes are loaded for web
+                                  );
+                                  if (result != null) {
+                                    String csvString;
+                                    if (kIsWeb) {
+                                      final bytes = result.files.single.bytes;
+                                      if (bytes != null) {
+                                        csvString = utf8.decode(bytes);
+                                      } else {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Failed to read file bytes.')),
+                                        );
+                                        return;
+                                      }
+                                    } else {
+                                      final path = result.files.single.path;
+                                      if (path != null) {
+                                        csvString = await File(path).readAsString();
+                                      } else {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Failed to read file path.')),
+                                        );
+                                        return;
+                                      }
+                                    }
+                                    final csvRows = const CsvToListConverter(eol: '\n', shouldParseNumbers: false).convert(csvString);
+                                    importedCards = csvRows
+                                        .where((row) => row.length >= 2)
+                                        .map((row) => Flashcard(question: row[0].toString().trim(), answer: row[1].toString().trim()))
+                                        .toList();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Loaded ${importedCards.length} cards from CSV.')),
+                                    );
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              child: const Text('Cancel'),
+                            ),
+                            ElevatedButton(
+                              onPressed: () async {
+                                if ((setName ?? '').trim().isNotEmpty && importedCards.isNotEmpty) {
+                                  await _flashcardSetBox.add(FlashcardSet(name: (setName ?? '').trim(), cards: importedCards));
+                                  await _refreshSets(selectLast: true);
+                                  Navigator.of(context).pop();
+                                }
+                              },
+                              child: const Text('Import'),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete),
+                  tooltip: 'Delete Set',
+                  onPressed: _flashcardSets.isEmpty
+                      ? null
+                      : () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Delete Set'),
+                              content: Text('Are you sure you want to delete "${_flashcardSets[_currentSetIndex].name}"?'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).pop(false),
+                                  child: const Text('Cancel'),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () => Navigator.of(context).pop(true),
+                                  child: const Text('Delete'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) {
+                            final key = _flashcardSetBox.keyAt(_currentSetIndex);
+                            await _flashcardSetBox.delete(key);
+                            await _refreshSets();
+                            setState(() {
+                              if (_flashcardSets.isEmpty) {
+                                _currentSetIndex = 0;
+                              } else if (_currentSetIndex >= _flashcardSets.length) {
+                                _currentSetIndex = _flashcardSets.length - 1;
+                              }
+                              _currentIndex = 0;
+                              _showAnswer = false;
+                              _controller.reset();
+                            });
+                          }
+                        },
+                ),
+                const SizedBox(width: 24),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _randomOrder,
+                      onChanged: (val) => _onRandomOrderChanged(val ?? false),
+                    ),
+                    const Text('Random order'),
+                  ],
+                ),
+              ],
             ),
-          ],
+          ),
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        currentSet.name,
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(width: 16),
+                      Builder(
+                        builder: (context) {
+                          final total = currentSet.cards.length;
+                          final int cardNumber = _randomOrder && _shuffledIndices.isNotEmpty
+                              ? _currentIndex + 1
+                              : _currentIndex + 1;
+                          return Text(
+                            'Card $cardNumber of $total',
+                            style: const TextStyle(fontSize: 16, color: Colors.grey),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  GestureDetector(
+                    onTap: _flipCard,
+                    child: AnimatedBuilder(
+                      animation: _animation,
+                      builder: (context, child) {
+                        final isUnder = (_animation.value > 0.5);
+                        final displayText = isUnder
+                            ? flashcard.answer
+                            : flashcard.question;
+                        return Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.rotationY(pi * _animation.value),
+                          child: isUnder
+                              ? Transform(
+                                  alignment: Alignment.center,
+                                  transform: Matrix4.rotationY(pi),
+                                  child: Card(
+                                    elevation: 8,
+                                    color: Colors.white,
+                                    child: SizedBox(
+                                      width: 360, // Increased width
+                                      height: 260, // Increased height
+                                      child: Center(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(16.0),
+                                          child: Text(
+                                            displayText,
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(fontSize: 24),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : Card(
+                                  elevation: 8,
+                                  color: Colors.white,
+                                  child: SizedBox(
+                                    width: 360, // Increased width
+                                    height: 260, // Increased height
+                                    child: Center(
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(16.0),
+                                        child: Text(
+                                          displayText,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(fontSize: 24),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ElevatedButton(
+                        onPressed: _currentIndex > 0 ? _previousCard : null,
+                        child: const Text('Previous'),
+                      ),
+                      const SizedBox(width: 16),
+                      Builder(
+                        builder: (context) {
+                          final total = _flashcardSets[_currentSetIndex].cards.length;
+                          final int cardNumber = _currentIndex + 1;
+                          final bool isLastCard = cardNumber == total;
+                          if (isLastCard) {
+                            return ElevatedButton(
+                              onPressed: _restartCards,
+                              child: const Text('Start Over'),
+                            );
+                          } else {
+                            return ElevatedButton(
+                              onPressed: _nextCard,
+                              child: const Text('Next'),
+                            );
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NewSetDialog extends StatefulWidget {
+  final void Function(FlashcardSet) onSave;
+  const _NewSetDialog({required this.onSave});
+
+  @override
+  State<_NewSetDialog> createState() => _NewSetDialogState();
+}
+
+class _NewSetDialogState extends State<_NewSetDialog> {
+  final _formKey = GlobalKey<FormState>();
+  String _setName = '';
+  List<Flashcard> _cards = [Flashcard(question: '', answer: '')];
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('New Flashcard Set'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                decoration: const InputDecoration(labelText: 'Set Name'),
+                validator: (value) => (value == null || value.isEmpty) ? 'Enter a name' : null,
+                onChanged: (value) => setState(() => _setName = value),
+              ),
+              const SizedBox(height: 16),
+              ..._cards.asMap().entries.map((entry) {
+                final i = entry.key;
+                final card = entry.value;
+                return Column(
+                  children: [
+                    TextFormField(
+                      decoration: InputDecoration(labelText: 'Question ${i + 1}'),
+                      initialValue: card.question,
+                      validator: (value) => (value == null || value.isEmpty) ? 'Enter a question' : null,
+                      onChanged: (value) => setState(() => _cards[i] = Flashcard(question: value, answer: card.answer)),
+                    ),
+                    TextFormField(
+                      decoration: InputDecoration(labelText: 'Answer ${i + 1}'),
+                      initialValue: card.answer,
+                      validator: (value) => (value == null || value.isEmpty) ? 'Enter an answer' : null,
+                      onChanged: (value) => setState(() => _cards[i] = Flashcard(question: card.question, answer: value)),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                );
+              }),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add Card'),
+                    onPressed: () => setState(() => _cards.add(Flashcard(question: '', answer: ''))),
+                  ),
+                  if (_cards.length > 1)
+                    TextButton.icon(
+                      icon: const Icon(Icons.remove),
+                      label: const Text('Remove'),
+                      onPressed: () => setState(() => _cards.removeLast()),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            if (_formKey.currentState!.validate()) {
+              widget.onSave(FlashcardSet(
+                name: _setName,
+                cards: _cards
+                    .where((c) => c.question.trim().isNotEmpty && c.answer.trim().isNotEmpty)
+                    .toList(),
+              ));
+              Navigator.of(context).pop();
+            }
+          },
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }
