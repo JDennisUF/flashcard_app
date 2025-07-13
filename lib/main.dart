@@ -8,6 +8,9 @@ import 'package:csv/csv.dart';
 import 'models/flashcard.dart';
 import 'models/flashcard_set.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http/http.dart' as http;
+// import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +18,7 @@ void main() async {
   Hive.registerAdapter(FlashcardAdapter());
   Hive.registerAdapter(FlashcardSetAdapter());
   await Hive.openBox<FlashcardSet>('flashcardSets');
+  // await dotenv.load(fileName: ".env");
   runApp(const MyApp());
 }
 
@@ -28,7 +32,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.purpleAccent),
       ),
-      home: const MyHomePage(title: 'Flashcards!'),
+      home: const MyHomePage(title: 'UbiFlash'),
     );
   }
 }
@@ -196,226 +200,358 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, // Align tops
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                DropdownButton<int>(
-                  value: _currentSetIndex,
-                  items: List.generate(_flashcardSets.length, (index) {
-                    return DropdownMenuItem(
-                      value: index,
-                      child: Text(_flashcardSets[index].name),
-                    );
-                  }),
-                  onChanged: (int? newIndex) {
-                    if (newIndex != null) {
-                      _onSetChanged(newIndex);
-                    }
-                  },
+                Padding(
+                  padding: const EdgeInsets.only(right: 24.0),
+                  child: Image.asset(
+                    'assets/images/ubiflash_logo.png',
+                    width: 60,
+                    height: 60,
+                  ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.add),
-                  tooltip: 'New Set',
-                  onPressed: () async {
-                    await showDialog(
-                      context: context,
-                      builder: (context) => _NewSetDialog(onSave: (FlashcardSet newSet) async {
-                        await _flashcardSetBox.add(newSet);
-                        await _refreshSets(selectLast: true);
-                      }),
-                    );
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.upload_file),
-                  tooltip: 'Import Set from CSV',
-                  onPressed: () async {
-                    String? setName = '';
-                    List<Flashcard> importedCards = [];
-                    await showDialog(
-                      context: context,
-                      builder: (context) {
-                        final nameController = TextEditingController();
-                        return AlertDialog(
-                          title: const Text('Import Flashcard Set from CSV'),
-                          content: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TextField(
-                                controller: nameController,
-                                decoration: const InputDecoration(labelText: 'Set Name'),
-                                onChanged: (value) => setName = value,
-                              ),
-                              const SizedBox(height: 16),
-                              ElevatedButton.icon(
-                                icon: const Icon(Icons.file_open),
-                                label: const Text('Select CSV File'),
-                                onPressed: () async {
-                                  FilePickerResult? result = await FilePicker.platform.pickFiles(
-                                    type: FileType.custom,
-                                    allowedExtensions: ['csv'],
-                                    withData: kIsWeb, // Ensures bytes are loaded for web
-                                  );
-                                  if (result != null) {
-                                    String csvString;
-                                    if (kIsWeb) {
-                                      final bytes = result.files.single.bytes;
-                                      if (bytes != null) {
-                                        csvString = utf8.decode(bytes);
-                                      } else {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Failed to read file bytes.')),
-                                        );
-                                        return;
-                                      }
-                                    } else {
-                                      final path = result.files.single.path;
-                                      if (path != null) {
-                                        csvString = await File(path).readAsString();
-                                      } else {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Failed to read file path.')),
-                                        );
-                                        return;
-                                      }
-                                    }
-                                    final csvRows = const CsvToListConverter(eol: '\n', shouldParseNumbers: false).convert(csvString);
-                                    importedCards = csvRows
-                                        .where((row) => row.length >= 2)
-                                        .map((row) => Flashcard(question: row[0].toString().trim(), answer: row[1].toString().trim()))
-                                        .toList();
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Loaded ${importedCards.length} cards from CSV.')),
-                                    );
-                                  }
-                                },
-                              ),
-                            ],
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(context).pop(),
-                              child: const Text('Cancel'),
-                            ),
-                            ElevatedButton(
-                              onPressed: () async {
-                                if ((setName ?? '').trim().isNotEmpty && importedCards.isNotEmpty) {
-                                  await _flashcardSetBox.add(FlashcardSet(name: (setName ?? '').trim(), cards: importedCards));
-                                  await _refreshSets(selectLast: true);
-                                  Navigator.of(context).pop();
-                                }
-                              },
-                              child: const Text('Import'),
-                            ),
-                          ],
-                        );
-                      },
-                    );
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete),
-                  tooltip: 'Delete Set',
-                  onPressed: _flashcardSets.isEmpty
-                      ? null
-                      : () async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: const Text('Delete Set'),
-                              content: Text('Are you sure you want to delete "${_flashcardSets[_currentSetIndex].name}"?'),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.of(context).pop(false),
-                                  child: const Text('Cancel'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: () => Navigator.of(context).pop(true),
-                                  child: const Text('Delete'),
-                                ),
-                              ],
-                            ),
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [
+                      DropdownButton<int>(
+                        value: _currentSetIndex,
+                        items: List.generate(_flashcardSets.length, (index) {
+                          return DropdownMenuItem(
+                            value: index,
+                            child: Text(_flashcardSets[index].name),
                           );
-                          if (confirm == true) {
-                            final key = _flashcardSetBox.keyAt(_currentSetIndex);
-                            await _flashcardSetBox.delete(key);
-                            await _refreshSets();
-                            setState(() {
-                              if (_flashcardSets.isEmpty) {
-                                _currentSetIndex = 0;
-                              } else if (_currentSetIndex >= _flashcardSets.length) {
-                                _currentSetIndex = _flashcardSets.length - 1;
-                              }
-                              _currentIndex = 0;
-                              _showAnswer = false;
-                              _controller.reset();
-                            });
+                        }),
+                        onChanged: (int? newIndex) {
+                          if (newIndex != null) {
+                            _onSetChanged(newIndex);
                           }
                         },
-                ),
-                const SizedBox(width: 24),
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _randomOrder,
-                      onChanged: (val) => _onRandomOrderChanged(val ?? false),
-                    ),
-                    const Text('Random order'),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        currentSet.name,
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
-                      const SizedBox(width: 16),
-                      Builder(
-                        builder: (context) {
-                          final total = currentSet.cards.length;
-                          final int cardNumber = _randomOrder && _shuffledIndices.isNotEmpty
-                              ? _currentIndex + 1
-                              : _currentIndex + 1;
-                          return Text(
-                            'Card $cardNumber of $total',
-                            style: const TextStyle(fontSize: 16, color: Colors.grey),
+                      IconButton(
+                        icon: const Icon(Icons.edit),
+                        tooltip: 'Edit Set',
+                        onPressed: _flashcardSets.isEmpty
+                            ? null
+                            : () async {
+                                await showDialog(
+                                  context: context,
+                                  builder: (context) => _EditSetDialog(
+                                    initialSet: _flashcardSets[_currentSetIndex],
+                                    onSave: (FlashcardSet updatedSet) async {
+                                      final key = _flashcardSetBox.keyAt(_currentSetIndex);
+                                      await _flashcardSetBox.put(key, updatedSet);
+                                      await _refreshSets();
+                                    },
+                                  ),
+                                );
+                              },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add),
+                        tooltip: 'New Set',
+                        onPressed: () async {
+                          await showDialog(
+                            context: context,
+                            builder: (context) => _EditSetDialog(
+                              initialSet: FlashcardSet(name: '', cards: [Flashcard(question: '', answer: '')]),
+                              onSave: (FlashcardSet newSet) async {
+                                await _flashcardSetBox.add(newSet);
+                                await _refreshSets(selectLast: true);
+                              },
+                            ),
                           );
                         },
+                      ),
+                      IconButton(
+                        icon: const Text('🧠', style: TextStyle(fontSize: 24)),
+                        tooltip: 'AI Flashcards',
+                        onPressed: () async {
+                          String topic = '';
+                          String setName = '';
+                          await showDialog(
+                            context: context,
+                            builder: (context) {
+                              final topicController = TextEditingController();
+                              final nameController = TextEditingController();
+                              String prompt = '';
+                              return StatefulBuilder(
+                                builder: (context, setState) {
+                                  return AlertDialog(
+                                    title: const Text('Get a GPT Prompt for Flashcards'),
+                                    content: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        TextField(
+                                          controller: nameController,
+                                          decoration: const InputDecoration(labelText: 'Set Name'),
+                                          onChanged: (value) => setName = value,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        TextField(
+                                          controller: topicController,
+                                          decoration: const InputDecoration(labelText: 'Topic or Prompt'),
+                                          onChanged: (value) {
+                                            topic = value;
+                                            prompt = 'Generate 10 flashcards about "$topic". Format as CSV: "question","answer"';
+                                            setState(() {});
+                                          },
+                                        ),
+                                        const SizedBox(height: 16),
+                                        if (topic.trim().isNotEmpty)
+                                          Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              const Text('Copy this prompt to GPT:'),
+                                              Container(
+                                                margin: const EdgeInsets.symmetric(vertical: 8),
+                                                padding: const EdgeInsets.all(8),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.grey[200],
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: SelectableText(prompt),
+                                              ),
+                                              TextButton.icon(
+                                                icon: const Icon(Icons.open_in_new),
+                                                label: const Text('Open ChatGPT'),
+                                                onPressed: () async {
+                                                  const gptUrl = 'https://chat.openai.com/';
+                                                  if (await canLaunchUrl(Uri.parse(gptUrl))) {
+                                                    await launchUrl(Uri.parse(gptUrl));
+                                                  }
+                                                },
+                                              ),
+                                            ],
+                                          ),
+                                      ],
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(context).pop(),
+                                        child: const Text('Close'),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+                            },
+                          );
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.upload_file),
+                        tooltip: 'Import Set from CSV',
+                        onPressed: () async {
+                          String? setName = '';
+                          List<Flashcard> importedCards = [];
+                          await showDialog(
+                            context: context,
+                            builder: (context) {
+                              final nameController = TextEditingController();
+                              return AlertDialog(
+                                title: const Text('Import Flashcard Set from CSV'),
+                                content: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    TextField(
+                                      controller: nameController,
+                                      decoration: const InputDecoration(labelText: 'Set Name'),
+                                      onChanged: (value) => setName = value,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    ElevatedButton.icon(
+                                      icon: const Icon(Icons.file_open),
+                                      label: const Text('Select CSV File'),
+                                      onPressed: () async {
+                                        FilePickerResult? result = await FilePicker.platform.pickFiles(
+                                          type: FileType.custom,
+                                          allowedExtensions: ['csv'],
+                                          withData: kIsWeb, // Ensures bytes are loaded for web
+                                        );
+                                        if (result != null) {
+                                          String csvString;
+                                          if (kIsWeb) {
+                                            final bytes = result.files.single.bytes;
+                                            if (bytes != null) {
+                                              csvString = utf8.decode(bytes);
+                                            } else {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                const SnackBar(content: Text('Failed to read file bytes.')),
+                                              );
+                                              return;
+                                            }
+                                          } else {
+                                            final path = result.files.single.path;
+                                            if (path != null) {
+                                              csvString = await File(path).readAsString();
+                                            } else {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                const SnackBar(content: Text('Failed to read file path.')),
+                                              );
+                                              return;
+                                            }
+                                          }
+                                          final csvRows = const CsvToListConverter(eol: '\n', shouldParseNumbers: false).convert(csvString);
+                                          importedCards = csvRows
+                                              .where((row) => row.length >= 2)
+                                              .map((row) => Flashcard(question: row[0].toString().trim(), answer: row[1].toString().trim()))
+                                              .toList();
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text('Loaded ${importedCards.length} cards from CSV.')),
+                                          );
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(context).pop(),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () async {
+                                      if ((setName ?? '').trim().isNotEmpty && importedCards.isNotEmpty) {
+                                        await _flashcardSetBox.add(FlashcardSet(name: (setName ?? '').trim(), cards: importedCards));
+                                        await _refreshSets(selectLast: true);
+                                        Navigator.of(context).pop();
+                                      }
+                                    },
+                                    child: const Text('Import'),
+                                  ),
+                                ],
+                              );
+                            },
+                          );
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete),
+                        tooltip: 'Delete Set',
+                        onPressed: _flashcardSets.isEmpty
+                            ? null
+                            : () async {
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Delete Set'),
+                                    content: Text('Are you sure you want to delete "${_flashcardSets[_currentSetIndex].name}"?'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(context).pop(false),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      ElevatedButton(
+                                        onPressed: () => Navigator.of(context).pop(true),
+                                        child: const Text('Delete'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirm == true) {
+                                  final key = _flashcardSetBox.keyAt(_currentSetIndex);
+                                  await _flashcardSetBox.delete(key);
+                                  await _refreshSets();
+                                  setState(() {
+                                    if (_flashcardSets.isEmpty) {
+                                      _currentSetIndex = 0;
+                                    } else if (_currentSetIndex >= _flashcardSets.length) {
+                                      _currentSetIndex = _flashcardSets.length - 1;
+                                    }
+                                    _currentIndex = 0;
+                                    _showAnswer = false;
+                                    _controller.reset();
+                                  });
+                                }
+                              },
+                      ),
+                      const SizedBox(width: 24),
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: _randomOrder,
+                            onChanged: (val) => _onRandomOrderChanged(val ?? false),
+                          ),
+                          const Text('Random order'),
+                        ],
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  GestureDetector(
-                    onTap: _flipCard,
-                    child: AnimatedBuilder(
-                      animation: _animation,
-                      builder: (context, child) {
-                        final isUnder = (_animation.value > 0.5);
-                        final displayText = isUnder
-                            ? flashcard.answer
-                            : flashcard.question;
-                        return Transform(
-                          alignment: Alignment.center,
-                          transform: Matrix4.rotationY(pi * _animation.value),
-                          child: isUnder
-                              ? Transform(
-                                  alignment: Alignment.center,
-                                  transform: Matrix4.rotationY(pi),
-                                  child: Card(
+                ),
+              ],
+            ),
+            // Center flashcard and navigation controls in the window
+            Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          currentSet.name,
+                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(width: 16),
+                        Builder(
+                          builder: (context) {
+                            final total = currentSet.cards.length;
+                            final int cardNumber = _randomOrder && _shuffledIndices.isNotEmpty
+                                ? _currentIndex + 1
+                                : _currentIndex + 1;
+                            return Text(
+                              'Card $cardNumber of $total',
+                              style: const TextStyle(fontSize: 16, color: Colors.grey),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    GestureDetector(
+                      onTap: _flipCard,
+                      child: AnimatedBuilder(
+                        animation: _animation,
+                        builder: (context, child) {
+                          final isUnder = (_animation.value > 0.5);
+                          final displayText = isUnder
+                              ? flashcard.answer
+                              : flashcard.question;
+                          return Transform(
+                            alignment: Alignment.center,
+                            transform: Matrix4.rotationY(pi * _animation.value),
+                            child: isUnder
+                                ? Transform(
+                                    alignment: Alignment.center,
+                                    transform: Matrix4.rotationY(pi),
+                                    child: Card(
+                                      elevation: 8,
+                                      color: Colors.white,
+                                      child: SizedBox(
+                                        width: 360, // Increased width
+                                        height: 260, // Increased height
+                                        child: Center(
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(16.0),
+                                            child: Text(
+                                              displayText,
+                                              textAlign: TextAlign.center,
+                                              style: const TextStyle(fontSize: 24),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : Card(
                                     elevation: 8,
                                     color: Colors.white,
                                     child: SizedBox(
@@ -433,85 +569,76 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                       ),
                                     ),
                                   ),
-                                )
-                              : Card(
-                                  elevation: 8,
-                                  color: Colors.white,
-                                  child: SizedBox(
-                                    width: 360, // Increased width
-                                    height: 260, // Increased height
-                                    child: Center(
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(16.0),
-                                        child: Text(
-                                          displayText,
-                                          textAlign: TextAlign.center,
-                                          style: const TextStyle(fontSize: 24),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      ElevatedButton(
-                        onPressed: _currentIndex > 0 ? _previousCard : null,
-                        child: const Text('Previous'),
-                      ),
-                      const SizedBox(width: 16),
-                      Builder(
-                        builder: (context) {
-                          final total = _flashcardSets[_currentSetIndex].cards.length;
-                          final int cardNumber = _currentIndex + 1;
-                          final bool isLastCard = cardNumber == total;
-                          if (isLastCard) {
-                            return ElevatedButton(
-                              onPressed: _restartCards,
-                              child: const Text('Start Over'),
-                            );
-                          } else {
-                            return ElevatedButton(
-                              onPressed: _nextCard,
-                              child: const Text('Next'),
-                            );
-                          }
+                          );
                         },
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: 32),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton(
+                          onPressed: _currentIndex > 0 ? _previousCard : null,
+                          child: const Text('Previous'),
+                        ),
+                        const SizedBox(width: 16),
+                        Builder(
+                          builder: (context) {
+                            final total = _flashcardSets[_currentSetIndex].cards.length;
+                            final int cardNumber = _currentIndex + 1;
+                            final bool isLastCard = cardNumber == total;
+                            if (isLastCard) {
+                              return ElevatedButton(
+                                onPressed: _restartCards,
+                                child: const Text('Start Over'),
+                              );
+                            } else {
+                              return ElevatedButton(
+                                onPressed: _nextCard,
+                                child: const Text('Next'),
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class _NewSetDialog extends StatefulWidget {
+// Flashcard Set Editor Dialog
+class _EditSetDialog extends StatefulWidget {
+  final FlashcardSet initialSet;
   final void Function(FlashcardSet) onSave;
-  const _NewSetDialog({required this.onSave});
+  const _EditSetDialog({required this.initialSet, required this.onSave});
 
   @override
-  State<_NewSetDialog> createState() => _NewSetDialogState();
+  State<_EditSetDialog> createState() => _EditSetDialogState();
 }
 
-class _NewSetDialogState extends State<_NewSetDialog> {
+class _EditSetDialogState extends State<_EditSetDialog> {
   final _formKey = GlobalKey<FormState>();
-  String _setName = '';
-  List<Flashcard> _cards = [Flashcard(question: '', answer: '')];
+  late String _setName;
+  late List<Flashcard> _cards;
+
+  @override
+  void initState() {
+    super.initState();
+    _setName = widget.initialSet.name;
+    _cards = widget.initialSet.cards.map((c) => Flashcard(question: c.question, answer: c.answer)).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('New Flashcard Set'),
+      title: const Text('Edit Flashcard Set'),
       content: SingleChildScrollView(
         child: Form(
           key: _formKey,
@@ -520,6 +647,7 @@ class _NewSetDialogState extends State<_NewSetDialog> {
             children: [
               TextFormField(
                 decoration: const InputDecoration(labelText: 'Set Name'),
+                initialValue: _setName,
                 validator: (value) => (value == null || value.isEmpty) ? 'Enter a name' : null,
                 onChanged: (value) => setState(() => _setName = value),
               ),
@@ -527,22 +655,38 @@ class _NewSetDialogState extends State<_NewSetDialog> {
               ..._cards.asMap().entries.map((entry) {
                 final i = entry.key;
                 final card = entry.value;
-                return Column(
-                  children: [
-                    TextFormField(
-                      decoration: InputDecoration(labelText: 'Question ${i + 1}'),
-                      initialValue: card.question,
-                      validator: (value) => (value == null || value.isEmpty) ? 'Enter a question' : null,
-                      onChanged: (value) => setState(() => _cards[i] = Flashcard(question: value, answer: card.answer)),
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Column(
+                      children: [
+                        TextFormField(
+                          decoration: InputDecoration(labelText: 'Question ${i + 1}'),
+                          initialValue: card.question,
+                          validator: (value) => (value == null || value.isEmpty) ? 'Enter a question' : null,
+                          onChanged: (value) => setState(() => _cards[i] = Flashcard(question: value, answer: card.answer)),
+                        ),
+                        TextFormField(
+                          decoration: InputDecoration(labelText: 'Answer ${i + 1}'),
+                          initialValue: card.answer,
+                          validator: (value) => (value == null || value.isEmpty) ? 'Enter an answer' : null,
+                          onChanged: (value) => setState(() => _cards[i] = Flashcard(question: card.question, answer: value)),
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            if (_cards.length > 1)
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                tooltip: 'Delete Card',
+                                onPressed: () => setState(() => _cards.removeAt(i)),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
-                    TextFormField(
-                      decoration: InputDecoration(labelText: 'Answer ${i + 1}'),
-                      initialValue: card.answer,
-                      validator: (value) => (value == null || value.isEmpty) ? 'Enter an answer' : null,
-                      onChanged: (value) => setState(() => _cards[i] = Flashcard(question: card.question, answer: value)),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
+                  ),
                 );
               }),
               Row(
@@ -553,12 +697,6 @@ class _NewSetDialogState extends State<_NewSetDialog> {
                     label: const Text('Add Card'),
                     onPressed: () => setState(() => _cards.add(Flashcard(question: '', answer: ''))),
                   ),
-                  if (_cards.length > 1)
-                    TextButton.icon(
-                      icon: const Icon(Icons.remove),
-                      label: const Text('Remove'),
-                      onPressed: () => setState(() => _cards.removeLast()),
-                    ),
                 ],
               ),
             ],
