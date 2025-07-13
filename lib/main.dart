@@ -9,8 +9,8 @@ import 'models/flashcard.dart';
 import 'models/flashcard_set.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
-// import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,7 +18,6 @@ void main() async {
   Hive.registerAdapter(FlashcardAdapter());
   Hive.registerAdapter(FlashcardSetAdapter());
   await Hive.openBox<FlashcardSet>('flashcardSets');
-  // await dotenv.load(fileName: ".env");
   runApp(const MyApp());
 }
 
@@ -320,12 +319,18 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                               ),
                                               TextButton.icon(
                                                 icon: const Icon(Icons.open_in_new),
-                                                label: const Text('Open ChatGPT'),
+                                                label: const Text('Copy & Open ChatGPT'),
                                                 onPressed: () async {
+                                                  // Copy prompt to clipboard
+                                                  await Clipboard.setData(ClipboardData(text: prompt));
+                                                  // Open ChatGPT site
                                                   const gptUrl = 'https://chat.openai.com/';
                                                   if (await canLaunchUrl(Uri.parse(gptUrl))) {
                                                     await launchUrl(Uri.parse(gptUrl));
                                                   }
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    const SnackBar(content: Text('Prompt copied to clipboard!')),
+                                                  );
                                                 },
                                               ),
                                             ],
@@ -377,6 +382,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                         );
                                         if (result != null) {
                                           String csvString;
+                                          String? fileName = result.files.single.name;
                                           if (kIsWeb) {
                                             final bytes = result.files.single.bytes;
                                             if (bytes != null) {
@@ -398,13 +404,20 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                               return;
                                             }
                                           }
+                                          // Auto-set Set Name from filename
+                                          if (fileName != null && fileName.isNotEmpty) {
+                                            String baseName = fileName.replaceAll('.csv', '').replaceAll('_', ' ');
+                                            String englishName = baseName.split(' ').map((w) => w.isNotEmpty ? w[0].toUpperCase() + w.substring(1) : '').join(' ');
+                                            nameController.text = englishName;
+                                            setName = englishName;
+                                          }
                                           final csvRows = const CsvToListConverter(eol: '\n', shouldParseNumbers: false).convert(csvString);
                                           importedCards = csvRows
                                               .where((row) => row.length >= 2)
                                               .map((row) => Flashcard(question: row[0].toString().trim(), answer: row[1].toString().trim()))
                                               .toList();
                                           ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(content: Text('Loaded ${importedCards.length} cards from CSV.')),
+                                            SnackBar(content: Text('Loaded {importedCards.length} cards from CSV.')),
                                           );
                                         }
                                       },
