@@ -11,9 +11,19 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
+import 'services/backend_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Check if backend server is available
+  try {
+    await BackendService.checkAvailability();
+    print('Backend server availability: ${BackendService.isAvailable}');
+  } catch (e) {
+    print('Warning: Could not check backend server availability: $e');
+  }
+  
   await Hive.initFlutter();
   Hive.registerAdapter(FlashcardAdapter());
   Hive.registerAdapter(FlashcardSetAdapter());
@@ -31,7 +41,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.purpleAccent),
       ),
-      home: const MyHomePage(title: 'UbiFlash'),
+      home: MyHomePage(title: 'UbiFlashcards'),
     );
   }
 }
@@ -54,6 +64,8 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
   bool _randomOrder = false;
   List<int> _shuffledIndices = [];
   Set<int> _seenIndices = {};
+  String _errorMessage = '';
+  DateTime? _errorTimestamp;
 
   @override
   void initState() {
@@ -187,6 +199,30 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     });
   }
 
+  void _showError(String message) {
+    setState(() {
+      _errorMessage = message;
+      _errorTimestamp = DateTime.now();
+    });
+    
+    // Auto-hide error after 10 seconds
+    Future.delayed(const Duration(seconds: 10), () {
+      if (mounted && _errorTimestamp != null) {
+        final timeDiff = DateTime.now().difference(_errorTimestamp!);
+        if (timeDiff.inSeconds >= 10) {
+          _clearError();
+        }
+      }
+    });
+  }
+
+  void _clearError() {
+    setState(() {
+      _errorMessage = '';
+      _errorTimestamp = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentSet = _flashcardSets[_currentSetIndex];
@@ -269,84 +305,71 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                         },
                       ),
                       IconButton(
-                        icon: const Text('🧠', style: TextStyle(fontSize: 24)),
-                        tooltip: 'AI Flashcards',
+                        icon: const Icon(Icons.smart_toy),
+                        tooltip: 'Generate AI Flashcards',
                         onPressed: () async {
-                          String topic = '';
-                          String setName = '';
+                          // Check if backend is available
+                          final isAvailable = await BackendService.checkAvailability();
+                          if (!isAvailable) {
+                            _showError('Backend server is not available. Please make sure the flashcard_backend server is running on 127.0.0.1:5000');
+                            return;
+                          }
+                          
                           await showDialog(
                             context: context,
-                            builder: (context) {
-                              final topicController = TextEditingController();
-                              final nameController = TextEditingController();
-                              String prompt = '';
-                              return StatefulBuilder(
-                                builder: (context, setState) {
-                                  return AlertDialog(
-                                    title: const Text('Get a GPT Prompt for Flashcards'),
-                                    content: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        TextField(
-                                          controller: nameController,
-                                          decoration: const InputDecoration(labelText: 'Set Name'),
-                                          onChanged: (value) => setName = value,
-                                        ),
-                                        const SizedBox(height: 12),
-                                        TextField(
-                                          controller: topicController,
-                                          decoration: const InputDecoration(labelText: 'Topic or Prompt'),
-                                          onChanged: (value) {
-                                            topic = value;
-                                            prompt = 'Generate 10 flashcards about "$topic". Format as CSV: "question","answer"';
-                                            setState(() {});
-                                          },
-                                        ),
-                                        const SizedBox(height: 16),
-                                        if (topic.trim().isNotEmpty)
-                                          Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              const Text('Copy this prompt to GPT:'),
-                                              Container(
-                                                margin: const EdgeInsets.symmetric(vertical: 8),
-                                                padding: const EdgeInsets.all(8),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.grey[200],
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
-                                                child: SelectableText(prompt),
-                                              ),
-                                              TextButton.icon(
-                                                icon: const Icon(Icons.open_in_new),
-                                                label: const Text('Copy & Open ChatGPT'),
-                                                onPressed: () async {
-                                                  // Copy prompt to clipboard
-                                                  await Clipboard.setData(ClipboardData(text: prompt));
-                                                  // Open ChatGPT site
-                                                  const gptUrl = 'https://chat.openai.com/';
-                                                  if (await canLaunchUrl(Uri.parse(gptUrl))) {
-                                                    await launchUrl(Uri.parse(gptUrl));
-                                                  }
-                                                  ScaffoldMessenger.of(context).showSnackBar(
-                                                    const SnackBar(content: Text('Prompt copied to clipboard!')),
-                                                  );
-                                                },
-                                              ),
-                                            ],
-                                          ),
-                                      ],
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.of(context).pop(),
-                                        child: const Text('Close'),
-                                      ),
-                                    ],
-                                  );
-                                },
-                              );
-                            },
+                            builder: (context) => _AIGenerateDialog(
+                              onGenerate: (FlashcardSet newSet) async {
+                                await _flashcardSetBox.add(newSet);
+                                await _refreshSets(selectLast: true);
+                              },
+                              onError: _showError,
+                            ),
+                          );
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.info_outline),
+                        tooltip: 'Debug Info',
+                        onPressed: () async {
+                          final serverStatus = await BackendService.getServerStatus();
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Debug Information'),
+                              content: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Backend Available: ${BackendService.isAvailable}'),
+                                  const SizedBox(height: 8),
+                                  Text('Backend URL: ${BackendService.baseUrl}'),
+                                  const SizedBox(height: 8),
+                                  Text('Server Status: ${serverStatus['available'] ?? 'Unknown'}'),
+                                  if (serverStatus['error'] != null) ...[
+                                    const SizedBox(height: 8),
+                                    Text('Error: ${serverStatus['error']}', style: const TextStyle(color: Colors.red)),
+                                  ],
+                                  const SizedBox(height: 8),
+                                  Text('Flashcard Sets: ${_flashcardSets.length}'),
+                                ],
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).pop(),
+                                  child: const Text('Close'),
+                                ),
+                                TextButton(
+                                  onPressed: () async {
+                                    await BackendService.checkAvailability();
+                                    Navigator.of(context).pop();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Backend status refreshed: ${BackendService.isAvailable}')),
+                                    );
+                                  },
+                                  child: const Text('Refresh'),
+                                ),
+                              ],
+                            ),
                           );
                         },
                       ),
@@ -615,6 +638,40 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                         ),
                       ],
                     ),
+                    // Error display below the bottom controls
+                    if (_errorMessage.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        constraints: const BoxConstraints(maxWidth: 500),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          border: Border.all(color: Colors.red.shade300),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.error_outline, color: Colors.red.shade600, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _errorMessage,
+                                style: TextStyle(
+                                  color: Colors.red.shade700,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.close, color: Colors.red.shade600, size: 18),
+                              onPressed: _clearError,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -734,6 +791,152 @@ class _EditSetDialogState extends State<_EditSetDialog> {
             }
           },
           child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+// AI Generate Dialog
+class _AIGenerateDialog extends StatefulWidget {
+  final void Function(FlashcardSet) onGenerate;
+  final void Function(String) onError;
+  const _AIGenerateDialog({required this.onGenerate, required this.onError});
+
+  @override
+  State<_AIGenerateDialog> createState() => _AIGenerateDialogState();
+}
+
+class _AIGenerateDialogState extends State<_AIGenerateDialog> {
+  final _topicController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _countController = TextEditingController(text: '10');
+  bool _isGenerating = false;
+  String _errorMessage = '';
+
+  void _updateSetName() {
+    final topic = _topicController.text.trim();
+    if (topic.isNotEmpty) {
+      _nameController.text = BackendService.generateSetName(topic);
+    }
+  }
+
+  Future<void> _generateFlashcards() async {
+    final topic = _topicController.text.trim();
+    final setName = _nameController.text.trim();
+    final countText = _countController.text.trim();
+
+    if (topic.isEmpty) {
+      setState(() => _errorMessage = 'Please enter a topic');
+      return;
+    }
+
+    if (setName.isEmpty) {
+      setState(() => _errorMessage = 'Please enter a set name');
+      return;
+    }
+
+    final count = int.tryParse(countText) ?? 10;
+    if (count < 1 || count > 50) {
+      setState(() => _errorMessage = 'Please enter a number between 1 and 50');
+      return;
+    }
+
+    setState(() {
+      _isGenerating = true;
+      _errorMessage = '';
+    });
+
+    try {
+      final flashcards = await BackendService.generateFlashcards(topic, count: count);
+      
+      if (flashcards.isEmpty) {
+        widget.onError('No flashcards were generated. Please try again.');
+        Navigator.of(context).pop();
+        return;
+      }
+
+      final flashcardSet = FlashcardSet(name: setName, cards: flashcards);
+      widget.onGenerate(flashcardSet);
+      
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Generated ${flashcards.length} flashcards for "$setName"')),
+        );
+      }
+    } catch (e) {
+      widget.onError('Failed to generate flashcards: ${e.toString()}');
+      Navigator.of(context).pop();
+    } finally {
+      setState(() => _isGenerating = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Generate AI Flashcards'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _topicController,
+              decoration: const InputDecoration(
+                labelText: 'Topic',
+                hintText: 'e.g., World War II, Python Programming, Spanish Verbs',
+              ),
+              onChanged: (_) => _updateSetName(),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _nameController,
+              decoration: const InputDecoration(
+                labelText: 'Set Name',
+                hintText: 'Name for your flashcard set',
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _countController,
+              decoration: const InputDecoration(
+                labelText: 'Number of Cards',
+                hintText: '1-50',
+              ),
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 16),
+            if (_errorMessage.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade100,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  _errorMessage,
+                  style: TextStyle(color: Colors.red.shade700),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isGenerating ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _isGenerating ? null : _generateFlashcards,
+          child: _isGenerating
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Generate'),
         ),
       ],
     );
