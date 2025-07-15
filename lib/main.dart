@@ -12,9 +12,14 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 import 'services/backend_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(
+    url: 'https://ujsmgrtrwuyityzfjnkk.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqc21ncnRyd3V5aXR5emZqbmtrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI1OTY3MzksImV4cCI6MjA2ODE3MjczOX0.sa3SDHo0fQ5kLH18_A5WiXjCVPr-3v3JEJ_R3uN66wI',
+  );
   
   // Check if backend server is available
   try {
@@ -41,7 +46,111 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.purpleAccent),
       ),
-      home: MyHomePage(title: 'UbiFlashcards'),
+      home: AuthGate(),
+    );
+  }
+}
+
+class AuthGate extends StatefulWidget {
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  @override
+  void initState() {
+    super.initState();
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      setState(() {});
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      return AuthScreen();
+    } else {
+      return MyHomePage(title: 'UbiFlashcards');
+    }
+  }
+}
+
+class AuthScreen extends StatefulWidget {
+  @override
+  State<AuthScreen> createState() => _AuthScreenState();
+}
+
+class _AuthScreenState extends State<AuthScreen> {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _isLogin = true;
+  String _error = '';
+  bool _loading = false;
+
+  Future<void> _submit() async {
+    setState(() { _loading = true; _error = ''; });
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+    try {
+      if (_isLogin) {
+        await Supabase.instance.client.auth.signInWithPassword(email: email, password: password);
+      } else {
+        await Supabase.instance.client.auth.signUp(email: email, password: password);
+      }
+    } catch (e) {
+      setState(() { _error = e.toString(); });
+    } finally {
+      setState(() { _loading = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(_isLogin ? 'Sign In' : 'Sign Up')),
+      body: Center(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: _emailController,
+                  decoration: const InputDecoration(labelText: 'Email'),
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _passwordController,
+                  decoration: const InputDecoration(labelText: 'Password'),
+                  obscureText: true,
+                ),
+                const SizedBox(height: 24),
+                if (_error.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Text(_error, style: const TextStyle(color: Colors.red)),
+                  ),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : _submit,
+                    child: _loading
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(_isLogin ? 'Sign In' : 'Sign Up'),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _loading ? null : () => setState(() => _isLogin = !_isLogin),
+                  child: Text(_isLogin ? 'Don\'t have an account? Sign Up' : 'Already have an account? Sign In'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -234,6 +343,43 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.account_circle),
+            tooltip: 'User Info',
+            onPressed: () async {
+              final user = Supabase.instance.client.auth.currentUser;
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('User Info'),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Email: ${user?.email ?? "Unknown"}'),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Close'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () async {
+                        await Supabase.instance.client.auth.signOut();
+                        if (context.mounted) {
+                          Navigator.of(context).pop();
+                        }
+                      },
+                      child: const Text('Log Out'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -440,7 +586,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                               .map((row) => Flashcard(question: row[0].toString().trim(), answer: row[1].toString().trim()))
                                               .toList();
                                           ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(content: Text('Loaded {importedCards.length} cards from CSV.')),
+                                            SnackBar(content: Text('Loaded  {importedCards.length} cards from CSV.')),
                                           );
                                         }
                                       },
