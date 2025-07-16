@@ -21,7 +21,6 @@ class BackendService {
       _isAvailable = response.statusCode == 200;
       return _isAvailable;
     } catch (e) {
-      print('Backend server not available: $e');
       _isAvailable = false;
       return false;
     }
@@ -64,7 +63,6 @@ class BackendService {
         throw Exception(errorData['error'] ?? 'HTTP ${response.statusCode}');
       }
     } catch (e) {
-      print('Error generating flashcards via backend: $e');
       throw Exception('Failed to generate flashcards: $e');
     }
   }
@@ -75,6 +73,6 @@ class BackendService {
     if (words.isEmpty) return 'AI Generated Set';
     
     final capitalized = words.map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase()).join(' ');
-    return '$capitalized Flashcards';
+    return capitalized;
   }
 }

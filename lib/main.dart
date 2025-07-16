@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'services/backend_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/supabase_service.dart';
+import 'dart:async';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -175,6 +176,9 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
   Set<int> _seenIndices = {};
   String _errorMessage = '';
   DateTime? _errorTimestamp;
+  bool _aiBackendAvailable = BackendService.isAvailable;
+  Timer? _aiBackendTimer;
+  Duration _aiBackendCheckInterval = const Duration(minutes: 5);
 
   @override
   void initState() {
@@ -185,6 +189,38 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     );
     _animation = Tween<double>(begin: 0, end: 1).animate(_controller);
     _loadFlashcardSets();
+    // Set initial interval based on initial backend state
+    _aiBackendCheckInterval = _aiBackendAvailable
+        ? const Duration(days: 7) // Effectively disables timer when up
+        : const Duration(seconds: 30);
+    _startBackendCheckTimer();
+  }
+
+  void _startBackendCheckTimer() {
+    _aiBackendTimer?.cancel();
+    _aiBackendTimer = Timer(_aiBackendCheckInterval, () async {
+      final available = await BackendService.checkAvailability();
+      if (!mounted) return;
+      if (available != _aiBackendAvailable) {
+        setState(() {
+          _aiBackendAvailable = available;
+        });
+      }
+      // Always set the interval based on the latest availability
+      if (available) {
+        _aiBackendCheckInterval = const Duration(days: 7); // Effectively disables timer when up
+      } else {
+        _aiBackendCheckInterval = const Duration(seconds: 30);
+      }
+      _startBackendCheckTimer(); // Always restart timer with new interval
+    });
+  }
+
+  @override
+  void dispose() {
+    _aiBackendTimer?.cancel();
+    _controller.dispose();
+    super.dispose();
   }
 
   Future<void> _loadFlashcardSets() async {
@@ -312,7 +348,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     Future.delayed(const Duration(seconds: 10), () {
       if (mounted && _errorTimestamp != null) {
         final timeDiff = DateTime.now().difference(_errorTimestamp!);
-        if (timeDiff.inSeconds >= 10) {
+        if (timeDiff.inSeconds >= 15) {
           _clearError();
         }
       }
@@ -390,27 +426,24 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                 },
               ),
               IconButton(
-                icon: const Icon(Icons.smart_toy),
-                tooltip: 'Generate AI Flashcards',
-                onPressed: () async {
-                  // Check if backend is available
-                  final isAvailable = await BackendService.checkAvailability();
-                  if (!isAvailable) {
-                    _showError('Backend server is not available. Please make sure the flashcard_backend server is running on 127.0.0.1:5000');
-                    return;
-                  }
-                  
-                  await showDialog(
-                    context: context,
-                    builder: (context) => _AIGenerateDialog(
-                      onGenerate: (FlashcardSet newSet) async {
-                        await SupabaseService.addFlashcardSet(newSet);
-                        await _refreshSets();
-                      },
-                      onError: _showError,
-                    ),
-                  );
-                },
+                icon: Icon(Icons.smart_toy, color: _aiBackendAvailable ? null : Colors.grey),
+                tooltip: _aiBackendAvailable
+                    ? 'Generate AI Flashcards'
+                    : 'AI server is starting up. Please wait a minute...',
+                onPressed: _aiBackendAvailable
+                    ? () async {
+                        await showDialog(
+                          context: context,
+                          builder: (context) => _AIGenerateDialog(
+                            onGenerate: (FlashcardSet newSet) async {
+                              await SupabaseService.addFlashcardSet(newSet);
+                              await _refreshSets();
+                            },
+                            onError: _showError,
+                          ),
+                        );
+                      }
+                    : null,
               ),
               IconButton(
                 icon: const Icon(Icons.info_outline),
@@ -761,27 +794,24 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                         },
                       ),
                       IconButton(
-                        icon: const Icon(Icons.smart_toy),
-                        tooltip: 'Generate AI Flashcards',
-                        onPressed: () async {
-                          // Check if backend is available
-                          final isAvailable = await BackendService.checkAvailability();
-                          if (!isAvailable) {
-                            _showError('Backend server is not available. Please make sure the flashcard_backend server is running on 127.0.0.1:5000');
-                            return;
-                          }
-                          
-                          await showDialog(
-                            context: context,
-                            builder: (context) => _AIGenerateDialog(
-                              onGenerate: (FlashcardSet newSet) async {
-                                await SupabaseService.addFlashcardSet(newSet);
-                                await _refreshSets();
-                              },
-                              onError: _showError,
-                            ),
-                          );
-                        },
+                        icon: Icon(Icons.smart_toy, color: _aiBackendAvailable ? null : Colors.grey),
+                        tooltip: _aiBackendAvailable
+                            ? 'Generate AI Flashcards'
+                            : 'AI server is starting up. Please wait a minute...',
+                        onPressed: _aiBackendAvailable
+                            ? () async {
+                                await showDialog(
+                                  context: context,
+                                  builder: (context) => _AIGenerateDialog(
+                                    onGenerate: (FlashcardSet newSet) async {
+                                      await SupabaseService.addFlashcardSet(newSet);
+                                      await _refreshSets();
+                                    },
+                                    onError: _showError,
+                                  ),
+                                );
+                              }
+                            : null,
                       ),
                       IconButton(
                         icon: const Icon(Icons.info_outline),
@@ -1368,8 +1398,8 @@ class _AIGenerateDialogState extends State<_AIGenerateDialog> {
     }
 
     final count = int.tryParse(countText) ?? 10;
-    if (count < 1 || count > 50) {
-      setState(() => _errorMessage = 'Please enter a number between 1 and 50');
+    if (count < 1 || count > 200) {
+      setState(() => _errorMessage = 'Please enter a number between 1 and 200');
       return;
     }
 
