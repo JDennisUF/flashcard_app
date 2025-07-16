@@ -1474,36 +1474,47 @@ class _AIGenerateDialogState extends State<_AIGenerateDialog> {
   }
 }
 
-Future<void> showDebugInfoDialog(BuildContext context, List<FlashcardSet> flashcardSets) async {  
+Future<void> showDebugInfoDialog(BuildContext context, List<FlashcardSet> flashcardSets) async {
   showDialog(
     context: context,
     builder: (context) => AlertDialog(
       title: const Text('Debug Information'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Backend Available: ${BackendService.isAvailable}'),
-          const SizedBox(height: 8),
-          Text('Backend URL: ${BackendService.baseUrl}'),
-          const SizedBox(height: 8),
-          Text('Flashcard Sets: ${flashcardSets.length}'),
-          const SizedBox(height: 8),
-          Builder(
-            builder: (context) {
-              final user = Supabase.instance.client.auth.currentUser;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Current User ID: ${user?.id ?? "Unknown"}'),
-                  Text('Current User Email: ${user?.email ?? "Unknown"}'),
-                  const SizedBox(height: 8),
-                  ...flashcardSets.map((set) => Text('Set: ${set.name}, id: ${set.id ?? "Unknown"}')),
-                ],
-              );
-            },
-          ),
-        ],
+      content: FutureBuilder<Map<String, dynamic>>(
+        future: BackendService.getServerStatus(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const SizedBox(
+              height: 80,
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Backend Available: ${BackendService.isAvailable}'),
+              const SizedBox(height: 8),
+              Text('Backend URL: ${BackendService.baseUrl}'),
+              const SizedBox(height: 8),
+              Text('Flashcard Sets: ${flashcardSets.length}'),
+              const SizedBox(height: 8),
+              Builder(
+                builder: (context) {
+                  final user = Supabase.instance.client.auth.currentUser;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Current User ID: ${user?.id ?? "Unknown"}'),
+                      Text('Current User Email: ${user?.email ?? "Unknown"}'),
+                      const SizedBox(height: 8),
+                      ...flashcardSets.map((set) => Text('Set: ${set.name}, id: ${set.id ?? "Unknown"}')),
+                    ],
+                  );
+                },
+              ),
+            ],
+          );
+        },
       ),
       actions: [
         TextButton(
