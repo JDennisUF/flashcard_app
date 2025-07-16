@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import '../models/flashcard.dart';
 
 class BackendService {
-  static const String _baseUrl = 'http://127.0.0.1:5000';
+  static const String _baseUrl = 'https://flashcard-backend-jyba.onrender.com';
   static bool _isAvailable = false;
 
   static bool get isAvailable => _isAvailable;
