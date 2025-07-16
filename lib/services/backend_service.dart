@@ -4,6 +4,7 @@ import '../models/flashcard.dart';
 
 class BackendService {
   static const String _baseUrl = 'https://flashcard-backend-jyba.onrender.com';
+  // static const String _baseUrl = 'http://127.0.0.1:5000';  // For local development
   static bool _isAvailable = false;
 
   static bool get isAvailable => _isAvailable;
@@ -75,29 +76,5 @@ class BackendService {
     
     final capitalized = words.map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase()).join(' ');
     return '$capitalized Flashcards';
-  }
-
-  /// Get server status information for debugging
-  static Future<Map<String, dynamic>> getServerStatus() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$_baseUrl/status'),
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 5));
-      
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else {
-        return {
-          'available': false,
-          'error': 'HTTP ${response.statusCode}',
-        };
-      }
-    } catch (e) {
-      return {
-        'available': false,
-        'error': e.toString(),
-      };
-    }
   }
 }

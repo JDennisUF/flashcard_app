@@ -1109,14 +1109,14 @@ class _EditSetDialog extends StatefulWidget {
 
 class _EditSetDialogState extends State<_EditSetDialog> {
   final _formKey = GlobalKey<FormState>();
-  late String _setName;
+  late TextEditingController _setNameController;
   late List<Flashcard> _cards;
   final List<FocusNode> _questionFocusNodes = [];
 
   @override
   void initState() {
     super.initState();
-    _setName = widget.initialSet.name;
+    _setNameController = TextEditingController(text: widget.initialSet.name);
     _cards = widget.initialSet.cards.map((c) => Flashcard(id: c.id, question: c.question, answer: c.answer, order: c.order)).toList();
     _questionFocusNodes.addAll(List.generate(_cards.length, (_) => FocusNode()));
     print(_cards.map((c) => c.question).toList());
@@ -1124,6 +1124,7 @@ class _EditSetDialogState extends State<_EditSetDialog> {
 
   @override
   void dispose() {
+    _setNameController.dispose();
     for (final node in _questionFocusNodes) {
       node.dispose();
     }
@@ -1160,9 +1161,8 @@ class _EditSetDialogState extends State<_EditSetDialog> {
               children: [
                 TextFormField(
                   decoration: const InputDecoration(labelText: 'Set Name'),
-                  initialValue: _setName,
+                  controller: _setNameController,
                   validator: (value) => (value == null || value.isEmpty) ? 'Enter a name' : null,
-                  onChanged: (value) => setState(() => _setName = value),
                 ),
                 const SizedBox(height: 8),
                 ..._cards.asMap().entries.map((entry) {
@@ -1307,7 +1307,7 @@ class _EditSetDialogState extends State<_EditSetDialog> {
             if (_formKey.currentState!.validate()) {
               final setToSave = FlashcardSet(
                 id: widget.initialSet.id,
-                name: _setName,
+                name: _setNameController.text.trim(),
                 cards: _cards
                     .where((c) => c.question.trim().isNotEmpty && c.answer.trim().isNotEmpty)
                     .toList(),
@@ -1479,42 +1479,31 @@ Future<void> showDebugInfoDialog(BuildContext context, List<FlashcardSet> flashc
     context: context,
     builder: (context) => AlertDialog(
       title: const Text('Debug Information'),
-      content: FutureBuilder<Map<String, dynamic>>(
-        future: BackendService.getServerStatus(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const SizedBox(
-              height: 80,
-              child: Center(child: CircularProgressIndicator()),
-            );
-          }
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Backend Available: ${BackendService.isAvailable}'),
-              const SizedBox(height: 8),
-              Text('Backend URL: ${BackendService.baseUrl}'),
-              const SizedBox(height: 8),
-              Text('Flashcard Sets: ${flashcardSets.length}'),
-              const SizedBox(height: 8),
-              Builder(
-                builder: (context) {
-                  final user = Supabase.instance.client.auth.currentUser;
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Current User ID: ${user?.id ?? "Unknown"}'),
-                      Text('Current User Email: ${user?.email ?? "Unknown"}'),
-                      const SizedBox(height: 8),
-                      ...flashcardSets.map((set) => Text('Set: ${set.name}, id: ${set.id ?? "Unknown"}')),
-                    ],
-                  );
-                },
-              ),
-            ],
-          );
-        },
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Backend Available: ${BackendService.isAvailable}'),
+          const SizedBox(height: 8),
+          Text('Backend URL: ${BackendService.baseUrl}'),
+          const SizedBox(height: 8),
+          Text('Flashcard Sets: ${flashcardSets.length}'),
+          const SizedBox(height: 8),
+          Builder(
+            builder: (context) {
+              final user = Supabase.instance.client.auth.currentUser;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Current User ID: ${user?.id ?? "Unknown"}'),
+                  Text('Current User Email: ${user?.email ?? "Unknown"}'),
+                  const SizedBox(height: 8),
+                  ...flashcardSets.map((set) => Text('Set: ${set.name}, id: ${set.id ?? "Unknown"}')),
+                ],
+              );
+            },
+          ),
+        ],
       ),
       actions: [
         TextButton(
