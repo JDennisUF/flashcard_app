@@ -8,11 +8,12 @@ import 'package:csv/csv.dart';
 import 'models/flashcard.dart';
 import 'models/flashcard_set.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:http/http.dart' as http;
-import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter/services.dart';
+// import 'package:http/http.dart' as http;
+// import 'package:url_launcher/url_launcher.dart';
+// import 'package:flutter/services.dart';
 import 'services/backend_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'services/supabase_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -163,7 +164,6 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateMixin {
-  late Box<FlashcardSet> _flashcardSetBox;
   List<FlashcardSet> _flashcardSets = [];
   int _currentSetIndex = 0;
   int _currentIndex = 0;
@@ -184,39 +184,35 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
       vsync: this,
     );
     _animation = Tween<double>(begin: 0, end: 1).animate(_controller);
-    _flashcardSetBox = Hive.box<FlashcardSet>('flashcardSets');
-    if (_flashcardSetBox.isEmpty) {
-      // Add initial data if box is empty
-      _flashcardSetBox.addAll([
-        FlashcardSet(
-          name: 'General Knowledge',
-          cards: [
-            Flashcard(question: 'What is the capital of France?', answer: 'Paris'),
-            Flashcard(question: 'What is 2 + 2?', answer: '4'),
-            Flashcard(question: 'What is the largest planet?', answer: 'Jupiter'),
-          ],
-        ),
-        FlashcardSet(
-          name: 'Science',
-          cards: [
-            Flashcard(question: 'What is H2O?', answer: 'Water'),
-            Flashcard(question: 'What planet is known as the Red Planet?', answer: 'Mars'),
-          ],
-        ),
-      ]);
-    }
-    _flashcardSets = _flashcardSetBox.values.toList();
+    _loadFlashcardSets();
   }
 
-  Future<void> _refreshSets({bool selectLast = false}) async {
-    setState(() {
-      _flashcardSets = _flashcardSetBox.values.toList();
-      if (selectLast && _flashcardSets.isNotEmpty) {
-        _currentSetIndex = _flashcardSets.length - 1;
+  Future<void> _loadFlashcardSets() async {
+    try {
+      final sets = await SupabaseService.fetchFlashcardSets();
+      setState(() {
+        _flashcardSets = sets;
+        _currentSetIndex = 0;
         _currentIndex = 0;
         _showAnswer = false;
         _controller.reset();
-      }
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Failed to load flashcard sets: '
+            '${e.toString()}';
+      });
+    }
+  }
+
+  Future<void> _refreshSets() async {
+    final sets = await SupabaseService.fetchFlashcardSets();
+    setState(() {
+      _flashcardSets = sets;
+      _currentSetIndex = 0;
+      _currentIndex = 0;
+      _showAnswer = false;
+      _controller.reset();
     });
   }
 
@@ -313,8 +309,6 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
       _errorMessage = message;
       _errorTimestamp = DateTime.now();
     });
-    
-    // Auto-hide error after 10 seconds
     Future.delayed(const Duration(seconds: 10), () {
       if (mounted && _errorTimestamp != null) {
         final timeDiff = DateTime.now().difference(_errorTimestamp!);
@@ -334,6 +328,327 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
+    Widget controlsRow = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 24.0),
+          child: Image.asset(
+            'assets/images/ubiflash_logo.png',
+            width: 60,
+            height: 60,
+          ),
+        ),
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              DropdownButton<int>(
+                value: _flashcardSets.isNotEmpty ? _currentSetIndex : null,
+                items: List.generate(_flashcardSets.length, (index) {
+                  return DropdownMenuItem(
+                    value: index,
+                    child: Text(_flashcardSets[index].name),
+                  );
+                }),
+                onChanged: _flashcardSets.isNotEmpty ? (int? newIndex) {
+                  if (newIndex != null) {
+                    _onSetChanged(newIndex);
+                  }
+                } : null,
+                hint: const Text('No sets'),
+              ),
+              IconButton(
+                icon: const Icon(Icons.edit),
+                tooltip: 'Edit Set',
+                onPressed: _flashcardSets.isEmpty
+                    ? null
+                    : () async {
+                        await showDialog(
+                          context: context,
+                          builder: (context) => _EditSetDialog(
+                            initialSet: _flashcardSets[_currentSetIndex],
+                            onSave: (_) {}, // no-op, handled in dialog now
+                          ),
+                        );
+                        await _refreshSets();
+                      },
+              ),
+              IconButton(
+                icon: const Icon(Icons.add),
+                tooltip: 'New Set',
+                onPressed: () async {
+                  final beforeCount = _flashcardSets.length;
+                  await showDialog(
+                    context: context,
+                    builder: (context) => _EditSetDialog(
+                      initialSet: FlashcardSet(name: '', cards: [Flashcard(question: '', answer: '')]),
+                      onSave: (_) {}, // no-op, handled in dialog now
+                    ),
+                  );
+                  await _refreshSets();
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.smart_toy),
+                tooltip: 'Generate AI Flashcards',
+                onPressed: () async {
+                  // Check if backend is available
+                  final isAvailable = await BackendService.checkAvailability();
+                  if (!isAvailable) {
+                    _showError('Backend server is not available. Please make sure the flashcard_backend server is running on 127.0.0.1:5000');
+                    return;
+                  }
+                  
+                  await showDialog(
+                    context: context,
+                    builder: (context) => _AIGenerateDialog(
+                      onGenerate: (FlashcardSet newSet) async {
+                        await SupabaseService.addFlashcardSet(newSet);
+                        await _refreshSets();
+                      },
+                      onError: _showError,
+                    ),
+                  );
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.info_outline),
+                tooltip: 'Debug Info',
+                onPressed: () => showDebugInfoDialog(context, _flashcardSets),
+              ),
+              IconButton(
+                icon: const Icon(Icons.upload_file),
+                tooltip: 'Import Set from CSV',
+                onPressed: () async {
+                  String? setName = '';
+                  List<Flashcard> importedCards = [];
+                  await showDialog(
+                    context: context,
+                    builder: (context) {
+                      final nameController = TextEditingController();
+                      return AlertDialog(
+                        title: const Text('Import Flashcard Set from CSV'),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextField(
+                              controller: nameController,
+                              decoration: const InputDecoration(labelText: 'Set Name'),
+                              onChanged: (value) => setName = value,
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              icon: const Icon(Icons.file_open),
+                              label: const Text('Select CSV File'),
+                              onPressed: () async {
+                                FilePickerResult? result = await FilePicker.platform.pickFiles(
+                                  type: FileType.custom,
+                                  allowedExtensions: ['csv'],
+                                  withData: kIsWeb, // Ensures bytes are loaded for web
+                                );
+                                if (result != null) {
+                                  String csvString;
+                                  String? fileName = result.files.single.name;
+                                  if (kIsWeb) {
+                                    final bytes = result.files.single.bytes;
+                                    if (bytes != null) {
+                                      csvString = utf8.decode(bytes);
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Failed to read file bytes.')),
+                                      );
+                                      return;
+                                    }
+                                  } else {
+                                    final path = result.files.single.path;
+                                    if (path != null) {
+                                      csvString = await File(path).readAsString();
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Failed to read file path.')),
+                                      );
+                                      return;
+                                    }
+                                  }
+                                  // Auto-set Set Name from filename
+                                  if (fileName != null && fileName.isNotEmpty) {
+                                    String baseName = fileName.replaceAll('.csv', '').replaceAll('_', ' ');
+                                    String englishName = baseName.split(' ').map((w) => w.isNotEmpty ? w[0].toUpperCase() + w.substring(1) : '').join(' ');
+                                    nameController.text = englishName;
+                                    setName = englishName;
+                                  }
+                                  final csvRows = const CsvToListConverter(eol: '\n', shouldParseNumbers: false).convert(csvString);
+                                  importedCards = csvRows
+                                      .where((row) => row.length >= 2)
+                                      .map((row) => Flashcard(question: row[0].toString().trim(), answer: row[1].toString().trim()))
+                                      .toList();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Loaded  {importedCards.length} cards from CSV.')),
+                                  );
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text('Cancel'),
+                          ),
+                          ElevatedButton(
+                            onPressed: () async {
+                              if ((setName ?? '').trim().isNotEmpty && importedCards.isNotEmpty) {
+                                await SupabaseService.addFlashcardSet(FlashcardSet(name: (setName ?? '').trim(), cards: importedCards));
+                                await _refreshSets();
+                                Navigator.of(context).pop();
+                              }
+                            },
+                            child: const Text('Import'),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete),
+                tooltip: 'Delete Set',
+                onPressed: _flashcardSets.isEmpty
+                    ? null
+                    : () async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Delete Set'),
+                            content: Text('Are you sure you want to delete "${_flashcardSets[_currentSetIndex].name}"?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(context).pop(false),
+                                child: const Text('Cancel'),
+                              ),
+                              ElevatedButton(
+                                onPressed: () => Navigator.of(context).pop(true),
+                                child: const Text('Delete'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirm == true) {
+                          await SupabaseService.deleteFlashcardSet(_flashcardSets[_currentSetIndex].id);
+                          await _refreshSets();
+                          setState(() {
+                            if (_flashcardSets.isEmpty) {
+                              _currentSetIndex = 0;
+                            } else if (_currentSetIndex >= _flashcardSets.length) {
+                              _currentSetIndex = _flashcardSets.length - 1;
+                            }
+                            _currentIndex = 0;
+                            _showAnswer = false;
+                            _controller.reset();
+                          });
+                        }
+                      },
+              ),
+              const SizedBox(width: 24),
+              Row(
+                children: [
+                  Checkbox(
+                    value: _randomOrder,
+                    onChanged: (val) => _onRandomOrderChanged(val ?? false),
+                  ),
+                  const Text('Random order'),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (_flashcardSets.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(
+          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          title: Text(widget.title),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.account_circle),
+              tooltip: 'User Info',
+              onPressed: () async {
+                final user = Supabase.instance.client.auth.currentUser;
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('User Info'),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Email: ${user?.email ?? "Unknown"}'),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Close'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () async {
+                          await Supabase.instance.client.auth.signOut();
+                          if (context.mounted) {
+                            Navigator.of(context).pop();
+                          }
+                        },
+                        child: const Text('Log Out'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        body: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              controlsRow,
+              const SizedBox(height: 32),
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('No flashcard sets found.', style: TextStyle(fontSize: 18)),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create New Set'),
+                      onPressed: () async {
+                        await showDialog(
+                          context: context,
+                          builder: (context) => _EditSetDialog(
+                            initialSet: FlashcardSet(name: '', cards: [Flashcard(question: '', answer: '')]),
+                            onSave: (FlashcardSet newSet) async {
+                              final userId = Supabase.instance.client.auth.currentUser?.id;
+                              await SupabaseService.addFlashcardSet(
+                                FlashcardSet(name: newSet.name, cards: newSet.cards, userId: userId),
+                              );
+                              await _refreshSets();
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     final currentSet = _flashcardSets[_currentSetIndex];
     final int displayIndex = _randomOrder && _shuffledIndices.isNotEmpty
         ? _shuffledIndices[_currentIndex]
@@ -425,13 +740,10 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                   context: context,
                                   builder: (context) => _EditSetDialog(
                                     initialSet: _flashcardSets[_currentSetIndex],
-                                    onSave: (FlashcardSet updatedSet) async {
-                                      final key = _flashcardSetBox.keyAt(_currentSetIndex);
-                                      await _flashcardSetBox.put(key, updatedSet);
-                                      await _refreshSets();
-                                    },
+                                    onSave: (_) {}, // no-op, handled in dialog now
                                   ),
                                 );
+                                await _refreshSets();
                               },
                       ),
                       IconButton(
@@ -442,12 +754,10 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                             context: context,
                             builder: (context) => _EditSetDialog(
                               initialSet: FlashcardSet(name: '', cards: [Flashcard(question: '', answer: '')]),
-                              onSave: (FlashcardSet newSet) async {
-                                await _flashcardSetBox.add(newSet);
-                                await _refreshSets(selectLast: true);
-                              },
+                              onSave: (_) {}, // no-op, handled in dialog now
                             ),
                           );
+                          await _refreshSets();
                         },
                       ),
                       IconButton(
@@ -465,8 +775,8 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                             context: context,
                             builder: (context) => _AIGenerateDialog(
                               onGenerate: (FlashcardSet newSet) async {
-                                await _flashcardSetBox.add(newSet);
-                                await _refreshSets(selectLast: true);
+                                await SupabaseService.addFlashcardSet(newSet);
+                                await _refreshSets();
                               },
                               onError: _showError,
                             ),
@@ -476,48 +786,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                       IconButton(
                         icon: const Icon(Icons.info_outline),
                         tooltip: 'Debug Info',
-                        onPressed: () async {
-                          final serverStatus = await BackendService.getServerStatus();
-                          showDialog(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: const Text('Debug Information'),
-                              content: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Backend Available: ${BackendService.isAvailable}'),
-                                  const SizedBox(height: 8),
-                                  Text('Backend URL: ${BackendService.baseUrl}'),
-                                  const SizedBox(height: 8),
-                                  Text('Server Status: ${serverStatus['available'] ?? 'Unknown'}'),
-                                  if (serverStatus['error'] != null) ...[
-                                    const SizedBox(height: 8),
-                                    Text('Error: ${serverStatus['error']}', style: const TextStyle(color: Colors.red)),
-                                  ],
-                                  const SizedBox(height: 8),
-                                  Text('Flashcard Sets: ${_flashcardSets.length}'),
-                                ],
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.of(context).pop(),
-                                  child: const Text('Close'),
-                                ),
-                                TextButton(
-                                  onPressed: () async {
-                                    await BackendService.checkAvailability();
-                                    Navigator.of(context).pop();
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Backend status refreshed: ${BackendService.isAvailable}')),
-                                    );
-                                  },
-                                  child: const Text('Refresh'),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
+                        onPressed: () => showDebugInfoDialog(context, _flashcardSets),
                       ),
                       IconButton(
                         icon: const Icon(Icons.upload_file),
@@ -601,8 +870,8 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                   ElevatedButton(
                                     onPressed: () async {
                                       if ((setName ?? '').trim().isNotEmpty && importedCards.isNotEmpty) {
-                                        await _flashcardSetBox.add(FlashcardSet(name: (setName ?? '').trim(), cards: importedCards));
-                                        await _refreshSets(selectLast: true);
+                                        await SupabaseService.addFlashcardSet(FlashcardSet(name: (setName ?? '').trim(), cards: importedCards));
+                                        await _refreshSets();
                                         Navigator.of(context).pop();
                                       }
                                     },
@@ -638,8 +907,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                   ),
                                 );
                                 if (confirm == true) {
-                                  final key = _flashcardSetBox.keyAt(_currentSetIndex);
-                                  await _flashcardSetBox.delete(key);
+                                  await SupabaseService.deleteFlashcardSet(_flashcardSets[_currentSetIndex].id);
                                   await _refreshSets();
                                   setState(() {
                                     if (_flashcardSets.isEmpty) {
@@ -843,79 +1111,189 @@ class _EditSetDialogState extends State<_EditSetDialog> {
   final _formKey = GlobalKey<FormState>();
   late String _setName;
   late List<Flashcard> _cards;
+  final List<FocusNode> _questionFocusNodes = [];
 
   @override
   void initState() {
     super.initState();
     _setName = widget.initialSet.name;
-    _cards = widget.initialSet.cards.map((c) => Flashcard(question: c.question, answer: c.answer)).toList();
+    _cards = widget.initialSet.cards.map((c) => Flashcard(id: c.id, question: c.question, answer: c.answer, order: c.order)).toList();
+    _questionFocusNodes.addAll(List.generate(_cards.length, (_) => FocusNode()));
+    print(_cards.map((c) => c.question).toList());
+  }
+
+  @override
+  void dispose() {
+    for (final node in _questionFocusNodes) {
+      node.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _deleteCard(int i) async {
+    print('Deleting card with id: ${_cards[i].id}');
+    final card = _cards[i];
+    if (card.id != null) {
+      try {
+        await SupabaseService.deleteFlashcard(card.id);
+      } catch (e) {
+        // Optionally show error
+      }
+    }
+    setState(() {
+      _cards.removeAt(i);
+      _questionFocusNodes.removeAt(i);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Edit Flashcard Set'),
-      content: SingleChildScrollView(
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                decoration: const InputDecoration(labelText: 'Set Name'),
-                initialValue: _setName,
-                validator: (value) => (value == null || value.isEmpty) ? 'Enter a name' : null,
-                onChanged: (value) => setState(() => _setName = value),
-              ),
-              const SizedBox(height: 16),
-              ..._cards.asMap().entries.map((entry) {
-                final i = entry.key;
-                final card = entry.value;
-                return Card(
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Column(
-                      children: [
-                        TextFormField(
-                          decoration: InputDecoration(labelText: 'Question ${i + 1}'),
-                          initialValue: card.question,
-                          validator: (value) => (value == null || value.isEmpty) ? 'Enter a question' : null,
-                          onChanged: (value) => setState(() => _cards[i] = Flashcard(question: value, answer: card.answer)),
-                        ),
-                        TextFormField(
-                          decoration: InputDecoration(labelText: 'Answer ${i + 1}'),
-                          initialValue: card.answer,
-                          validator: (value) => (value == null || value.isEmpty) ? 'Enter an answer' : null,
-                          onChanged: (value) => setState(() => _cards[i] = Flashcard(question: card.question, answer: value)),
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            if (_cards.length > 1)
-                              IconButton(
-                                icon: const Icon(Icons.delete, color: Colors.red),
-                                tooltip: 'Delete Card',
-                                onPressed: () => setState(() => _cards.removeAt(i)),
-                              ),
-                          ],
-                        ),
-                      ],
+      content: SizedBox(
+        width: 700, // Much wider dialog
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  decoration: const InputDecoration(labelText: 'Set Name'),
+                  initialValue: _setName,
+                  validator: (value) => (value == null || value.isEmpty) ? 'Enter a name' : null,
+                  onChanged: (value) => setState(() => _setName = value),
+                ),
+                const SizedBox(height: 8),
+                ..._cards.asMap().entries.map((entry) {
+                  final i = entry.key;
+                  final card = entry.value;
+                  return Card(
+                    key: ValueKey(card.id ?? i), // Add unique key for each card
+                    margin: const EdgeInsets.symmetric(vertical: 2),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: TextFormField(
+                              decoration: InputDecoration(labelText: 'Question 0${i + 1}'),
+                              initialValue: card.question,
+                              validator: (value) => (value == null || value.isEmpty) ? 'Enter a question' : null,
+                              onChanged: (value) => setState(() => _cards[i] = Flashcard(id: card.id, question: value, answer: card.answer, order: card.order)),
+                              focusNode: _questionFocusNodes[i],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            flex: 3,
+                            child: TextFormField(
+                              decoration: InputDecoration(labelText: 'Answer 0${i + 1}'),
+                              initialValue: card.answer,
+                              validator: (value) => (value == null || value.isEmpty) ? 'Enter an answer' : null,
+                              onChanged: (value) => setState(() => _cards[i] = Flashcard(id: card.id, question: card.question, answer: value, order: card.order)),
+                            ),
+                          ),
+                          if (_cards.length > 1)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_upward),
+                                  tooltip: 'Move Up',
+                                  onPressed: i > 0
+                                      ? () {
+                                          setState(() {
+                                            final temp = _cards[i - 1];
+                                            _cards[i - 1] = _cards[i];
+                                            _cards[i] = temp;
+                                            final tempNode = _questionFocusNodes[i - 1];
+                                            _questionFocusNodes[i - 1] = _questionFocusNodes[i];
+                                            _questionFocusNodes[i] = tempNode;
+                                          });
+                                        }
+                                      : null,
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.arrow_downward),
+                                  tooltip: 'Move Down',
+                                  onPressed: i < _cards.length - 1
+                                      ? () {
+                                          setState(() {
+                                            final temp = _cards[i + 1];
+                                            _cards[i + 1] = _cards[i];
+                                            _cards[i] = temp;
+                                            final tempNode = _questionFocusNodes[i + 1];
+                                            _questionFocusNodes[i + 1] = _questionFocusNodes[i];
+                                            _questionFocusNodes[i] = tempNode;
+                                          });
+                                        }
+                                      : null,
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.vertical_align_top),
+                                  tooltip: 'Move First',
+                                  onPressed: i > 0
+                                      ? () {
+                                          setState(() {
+                                            final cardToMove = _cards.removeAt(i);
+                                            _cards.insert(0, cardToMove);
+                                            final nodeToMove = _questionFocusNodes.removeAt(i);
+                                            _questionFocusNodes.insert(0, nodeToMove);
+                                          });
+                                        }
+                                      : null,
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.vertical_align_bottom),
+                                  tooltip: 'Move Last',
+                                  onPressed: i < _cards.length - 1
+                                      ? () {
+                                          setState(() {
+                                            final cardToMove = _cards.removeAt(i);
+                                            _cards.add(cardToMove);
+                                            final nodeToMove = _questionFocusNodes.removeAt(i);
+                                            _questionFocusNodes.add(nodeToMove);
+                                          });
+                                        }
+                                      : null,
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  tooltip: 'Delete Card',
+                                  onPressed: () => _deleteCard(i),
+                                ),
+                              ],
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              }),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  TextButton.icon(
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Card'),
-                    onPressed: () => setState(() => _cards.add(Flashcard(question: '', answer: ''))),
-                  ),
-                ],
-              ),
-            ],
+                  );
+                }),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Card'),
+                      onPressed: () {
+                        setState(() {
+                          _cards.add(Flashcard(id: null, question: '', answer: '', order: _cards.length));
+                          _questionFocusNodes.add(FocusNode());
+                        });
+                        // Wait for the UI to update, then request focus
+                        Future.delayed(Duration(milliseconds: 100), () {
+                          if (_questionFocusNodes.isNotEmpty) {
+                            _questionFocusNodes.last.requestFocus();
+                          }
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -925,15 +1303,22 @@ class _EditSetDialogState extends State<_EditSetDialog> {
           child: const Text('Cancel'),
         ),
         ElevatedButton(
-          onPressed: () {
+          onPressed: () async {
             if (_formKey.currentState!.validate()) {
-              widget.onSave(FlashcardSet(
+              final setToSave = FlashcardSet(
+                id: widget.initialSet.id,
                 name: _setName,
                 cards: _cards
                     .where((c) => c.question.trim().isNotEmpty && c.answer.trim().isNotEmpty)
                     .toList(),
-              ));
-              Navigator.of(context).pop();
+                userId: Supabase.instance.client.auth.currentUser?.id,
+              );
+              if (setToSave.id != null) {
+                await SupabaseService.updateFlashcardSet(setToSave);
+              } else {
+                await SupabaseService.addFlashcardSet(setToSave);
+              }
+              if (context.mounted) Navigator.of(context).pop();
             }
           },
           child: const Text('Save'),
@@ -1087,4 +1472,55 @@ class _AIGenerateDialogState extends State<_AIGenerateDialog> {
       ],
     );
   }
+}
+
+Future<void> showDebugInfoDialog(BuildContext context, List<FlashcardSet> flashcardSets) async {  
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Debug Information'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Backend Available: ${BackendService.isAvailable}'),
+          const SizedBox(height: 8),
+          Text('Backend URL: ${BackendService.baseUrl}'),
+          const SizedBox(height: 8),
+          Text('Flashcard Sets: ${flashcardSets.length}'),
+          const SizedBox(height: 8),
+          Builder(
+            builder: (context) {
+              final user = Supabase.instance.client.auth.currentUser;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Current User ID: ${user?.id ?? "Unknown"}'),
+                  Text('Current User Email: ${user?.email ?? "Unknown"}'),
+                  const SizedBox(height: 8),
+                  ...flashcardSets.map((set) => Text('Set: ${set.name}, id: ${set.id ?? "Unknown"}')),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+        TextButton(
+          onPressed: () async {
+            await BackendService.checkAvailability();
+            Navigator.of(context).pop();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Backend status refreshed: ${BackendService.isAvailable}')),
+            );
+          },
+          child: const Text('Refresh'),
+        ),
+      ],
+    ),
+  );
 }
