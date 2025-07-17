@@ -81,7 +81,6 @@ class SupabaseService {
   // Delete a single flashcard by id
   static Future<void> deleteFlashcard(String? cardId) async {
     // debug msg for cardId
-    print('Deleting flashcard with id: $cardId');
     if (cardId == null) return;
     await _client.from('flashcards').delete().eq('id', cardId);
   }

@@ -26,9 +26,8 @@ void main() async {
   // Check if backend server is available
   try {
     await BackendService.checkAvailability();
-    print('Backend server availability: ${BackendService.isAvailable}');
   } catch (e) {
-    print('Warning: Could not check backend server availability: $e');
+    print('Error checking backend server availability: $e');
   }
   
   await Hive.initFlutter();
@@ -173,9 +172,11 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
   late Animation<double> _animation;
   bool _randomOrder = false;
   List<int> _shuffledIndices = [];
-  Set<int> _seenIndices = {};
+  final Set<int> _seenIndices = {};
   String _errorMessage = '';
   DateTime? _errorTimestamp;
+  String _infoMessage = '';
+  DateTime? _infoTimestamp;
   bool _aiBackendAvailable = BackendService.isAvailable;
   Timer? _aiBackendTimer;
   Duration _aiBackendCheckInterval = const Duration(minutes: 5);
@@ -204,6 +205,11 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
       if (available != _aiBackendAvailable) {
         setState(() {
           _aiBackendAvailable = available;
+          // Clear error/warning if backend is now available
+          if (available && _errorMessage.isNotEmpty) {
+            _clearError();
+            _showInfo('AI server is available. You can now generate flashcards!');
+          }
         });
       }
       // Always set the interval based on the latest availability
@@ -340,16 +346,36 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     });
   }
 
+  // Ensure error is cleared after a timeout if not already
   void _showError(String message) {
     setState(() {
       _errorMessage = message;
       _errorTimestamp = DateTime.now();
+      _infoMessage = '';
+      _infoTimestamp = null;
     });
-    Future.delayed(const Duration(seconds: 10), () {
+    Future.delayed(const Duration(seconds: 15), () {
       if (mounted && _errorTimestamp != null) {
         final timeDiff = DateTime.now().difference(_errorTimestamp!);
         if (timeDiff.inSeconds >= 15) {
           _clearError();
+        }
+      }
+    });
+  }
+
+  void _showInfo(String message) {
+    setState(() {
+      _infoMessage = message;
+      _infoTimestamp = DateTime.now();
+      _errorMessage = '';
+      _errorTimestamp = null;
+    });
+    Future.delayed(const Duration(seconds: 15), () {
+      if (mounted && _infoTimestamp != null) {
+        final timeDiff = DateTime.now().difference(_infoTimestamp!);
+        if (timeDiff.inSeconds >= 15) {
+          _clearInfo();
         }
       }
     });
@@ -360,6 +386,22 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
       _errorMessage = '';
       _errorTimestamp = null;
     });
+  }
+
+  void _clearInfo() {
+    setState(() {
+      _infoMessage = '';
+      _infoTimestamp = null;
+    });
+  }
+
+  void _handleBackendUnavailable(String errorMessage) {
+    setState(() {
+      _aiBackendAvailable = false;
+      _aiBackendCheckInterval = const Duration(seconds: 30);
+    });
+    _startBackendCheckTimer();
+    _showError(errorMessage);
   }
 
   @override
@@ -414,7 +456,6 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                 icon: const Icon(Icons.add),
                 tooltip: 'New Set',
                 onPressed: () async {
-                  final beforeCount = _flashcardSets.length;
                   await showDialog(
                     context: context,
                     builder: (context) => _EditSetDialog(
@@ -432,6 +473,17 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                     : 'AI server is starting up. Please wait a minute...',
                 onPressed: _aiBackendAvailable
                     ? () async {
+                        // Do a /health check before launching the dialog
+                        bool available = false;
+                        try {
+                          available = await BackendService.checkAvailability();
+                        } catch (_) {
+                          available = false;
+                        }
+                        if (!available) {
+                          _handleBackendUnavailable('AI server is starting up. Please wait a minute...');
+                          return;
+                        }
                         await showDialog(
                           context: context,
                           builder: (context) => _AIGenerateDialog(
@@ -439,7 +491,9 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                               await SupabaseService.addFlashcardSet(newSet);
                               await _refreshSets();
                             },
-                            onError: _showError,
+                            onError: (String errorMsg) {
+                              _handleBackendUnavailable(errorMsg);
+                            },
                           ),
                         );
                       }
@@ -505,7 +559,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                     }
                                   }
                                   // Auto-set Set Name from filename
-                                  if (fileName != null && fileName.isNotEmpty) {
+                                  if (fileName.isNotEmpty) {
                                     String baseName = fileName.replaceAll('.csv', '').replaceAll('_', ' ');
                                     String englishName = baseName.split(' ').map((w) => w.isNotEmpty ? w[0].toUpperCase() + w.substring(1) : '').join(' ');
                                     nameController.text = englishName;
@@ -800,6 +854,17 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                             : 'AI server is starting up. Please wait a minute...',
                         onPressed: _aiBackendAvailable
                             ? () async {
+                                // Do a /health check before launching the dialog
+                                bool available = false;
+                                try {
+                                  available = await BackendService.checkAvailability();
+                                } catch (_) {
+                                  available = false;
+                                }
+                                if (!available) {
+                                  _handleBackendUnavailable('AI server is starting up. Please wait a minute...');
+                                  return;
+                                }
                                 await showDialog(
                                   context: context,
                                   builder: (context) => _AIGenerateDialog(
@@ -807,7 +872,9 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                       await SupabaseService.addFlashcardSet(newSet);
                                       await _refreshSets();
                                     },
-                                    onError: _showError,
+                                    onError: (String errorMsg) {
+                                      _handleBackendUnavailable(errorMsg);
+                                    },
                                   ),
                                 );
                               }
@@ -873,7 +940,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                                             }
                                           }
                                           // Auto-set Set Name from filename
-                                          if (fileName != null && fileName.isNotEmpty) {
+                                          if (fileName.isNotEmpty) {
                                             String baseName = fileName.replaceAll('.csv', '').replaceAll('_', ' ');
                                             String englishName = baseName.split(' ').map((w) => w.isNotEmpty ? w[0].toUpperCase() + w.substring(1) : '').join(' ');
                                             nameController.text = englishName;
@@ -1082,7 +1149,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                         ),
                       ],
                     ),
-                    // Error display below the bottom controls
+                    // Error/info display below the bottom controls
                     if (_errorMessage.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       Container(
@@ -1109,6 +1176,38 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                             IconButton(
                               icon: Icon(Icons.close, color: Colors.red.shade600, size: 18),
                               onPressed: _clearError,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ] else if (_infoMessage.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        constraints: const BoxConstraints(maxWidth: 500),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          border: Border.all(color: Colors.green.shade300),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.info_outline, color: Colors.green.shade600, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _infoMessage,
+                                style: TextStyle(
+                                  color: Colors.green.shade700,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.close, color: Colors.green.shade600, size: 18),
+                              onPressed: _clearInfo,
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
                             ),
@@ -1149,7 +1248,6 @@ class _EditSetDialogState extends State<_EditSetDialog> {
     _setNameController = TextEditingController(text: widget.initialSet.name);
     _cards = widget.initialSet.cards.map((c) => Flashcard(id: c.id, question: c.question, answer: c.answer, order: c.order)).toList();
     _questionFocusNodes.addAll(List.generate(_cards.length, (_) => FocusNode()));
-    print(_cards.map((c) => c.question).toList());
   }
 
   @override
@@ -1162,7 +1260,6 @@ class _EditSetDialogState extends State<_EditSetDialog> {
   }
 
   Future<void> _deleteCard(int i) async {
-    print('Deleting card with id: ${_cards[i].id}');
     final card = _cards[i];
     if (card.id != null) {
       try {
