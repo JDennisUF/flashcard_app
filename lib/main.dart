@@ -1,3 +1,5 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -8,9 +10,6 @@ import 'package:csv/csv.dart';
 import 'models/flashcard.dart';
 import 'models/flashcard_set.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-// import 'package:http/http.dart' as http;
-// import 'package:url_launcher/url_launcher.dart';
-// import 'package:flutter/services.dart';
 import 'services/backend_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/supabase_service.dart';
@@ -22,13 +21,6 @@ void main() async {
     url: 'https://ujsmgrtrwuyityzfjnkk.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqc21ncnRyd3V5aXR5emZqbmtrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI1OTY3MzksImV4cCI6MjA2ODE3MjczOX0.sa3SDHo0fQ5kLH18_A5WiXjCVPr-3v3JEJ_R3uN66wI',
   );
-  
-  // Check if backend server is available
-  try {
-    await BackendService.checkAvailability();
-  } catch (e) {
-    print('Error checking backend server availability: $e');
-  }
   
   await Hive.initFlutter();
   Hive.registerAdapter(FlashcardAdapter());
@@ -194,6 +186,15 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
     _aiBackendCheckInterval = _aiBackendAvailable
         ? const Duration(days: 7) // Effectively disables timer when up
         : const Duration(seconds: 30);
+    // Immediately check backend availability after UI loads
+    Future.microtask(() async {
+      final available = await BackendService.checkAvailability();
+      if (mounted && available != _aiBackendAvailable) {
+        setState(() {
+          _aiBackendAvailable = available;
+        });
+      }
+    });
     _startBackendCheckTimer();
   }
 

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Confirming...</title>
+    <script type="module">
+      import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+
+      const supabase = createClient(
+        'https://ujsmgrtrwuyityzfjnkk.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqc21ncnRyd3V5aXR5emZqbmtrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI1OTY3MzksImV4cCI6MjA2ODE3MjczOX0.sa3SDHo0fQ5kLH18_A5WiXjCVPr-3v3JEJ_R3uN66wI'
+      );
+
+      const hash = window.location.hash;
+      const params = new URLSearchParams(hash.substring(1));
+
+      const access_token = params.get('access_token');
+      const refresh_token = params.get('refresh_token');
+
+      if (access_token && refresh_token) {
+        supabase.auth.setSession({ access_token, refresh_token }).then(() => {
+          window.location.href = '/flashcards/index.html';
+        });
+      } else {
+        document.body.textContent = 'Invalid or expired confirmation link.';
+      }
+    </script>
+  </head>
+  <body>
+    Confirming your email...
+  </body>
+</html>
