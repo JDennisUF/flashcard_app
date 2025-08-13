@@ -26,11 +26,20 @@ A beautiful, cross-platform Flutter app for studying with flashcards. Supports d
    git clone <your-repo-url>
    cd flashcard_app
    ```
-3. **Install dependencies:**
+3. **Set up environment variables:**
+   ```bash
+   cp .env.example .env
+   ```
+   Edit `.env` and add your Supabase credentials:
+   ```
+   SUPABASE_URL=your_supabase_url_here
+   SUPABASE_ANON_KEY=your_supabase_anon_key_here
+   ```
+4. **Install dependencies:**
    ```bash
    flutter pub get
    ```
-4. **Run the app:**
+5. **Run the app:**
    - **Desktop:** `flutter run -d windows` (or `linux`, `macos`)
    - **Web:** `flutter run -d chrome` (for debug) or build for release (see below)
    - **Mobile:** `flutter run -d <device>`

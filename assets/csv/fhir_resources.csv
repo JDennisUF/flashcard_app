@@ -1,0 +1,87 @@
+Patient,Represents an individual receiving care or health services.
+Practitioner,Represents a healthcare provider such as a doctor or nurse.
+PractitionerRole,Describes a practitioner's role at an organization.
+RelatedPerson,Represents a person related to a patient, e.g. family.
+Organization,Represents an organization such as hospital or insurer.
+Location,Represents a place where services are delivered.
+HealthcareService,Details services offered by an organization.
+Endpoint,Technical endpoint for electronic services (e.g. APIs).
+Device,Represents a device used in healthcare (e.g. a pacemaker).
+DeviceDefinition,Defines details about a device model/manufacturer.
+DeviceMetric,Represents measurements related to device operation.
+DeviceUseStatement,Record of a patient's use of a device.
+DeviceRequest,Request for a patient to use a device.
+Appointment,Booking of a healthcare appointment slot.
+AppointmentResponse,Response to an appointment request.
+Schedule,Defines availability for appointments.
+Slot,A time slot in a schedule for booking.
+Encounter,An interaction between patient and healthcare provider.
+EpisodeOfCare,Period of care related to specific condition or goal.
+Task,Work item assigned to be performed (clinical workflow).
+Goal,Describes expected outcomes for care.
+CarePlan,Plan for patient care including activities/tasks.
+CareTeam,Team of practitioners involved in a patient's care.
+Condition,Clinical condition or diagnosis affecting a patient.
+AllergyIntolerance,Record of allergy or intolerance events.
+Medication,Definition of a medication (drug/form).
+MedicationRequest,An order or request for medication.
+MedicationAdministration,Record of medication being administered.
+MedicationDispense,Details of medication dispensed to patient.
+MedicationStatement,Statement that medication is being taken.
+MedicationKnowledge,Core knowledge about a medication.
+Immunization,Record of immunization event.
+ImmunizationEvaluation,Assessment of immunization status.
+ImmunizationRecommendation,Suggestions for immunizations.
+Observation,Measurements or assertions about patient (lab, vital).
+DiagnosticReport,Report of diagnostic tests (lab, imaging).
+Procedure,A specific healthcare activity performed on a patient.
+ServiceRequest,Request for service such as imaging or lab.
+NutritionOrder,Order related to nutrition therapies.
+FamilyMemberHistory,Information about patient's family health.
+RiskAssessment,Potential health risks identified for patient.
+ResearchStudy,Definition of a research study.
+ResearchSubject,Record of a subject’s involvement in a study.
+DeviceUseStatement,Record of a patient's use of a device.
+Provenance,Metadata about origin or change of a resource.
+AuditEvent,Record of system activity for security/audit.
+Consent,Record authorizing or denying access to health data.
+VerificationResult,Result of verification of credentials.
+Coverage,Insurance or payment coverage details.
+CoverageEligibilityRequest,Request to check coverage eligibility.
+CoverageEligibilityResponse,Response to eligibility request.
+Claim,Claim for healthcare or coverage payment.
+ClaimResponse,Response to a submitted claim.
+PaymentNotice,Notification about payment processing.
+PaymentReconciliation,Details reconciling claims and payments.
+Invoice,Billing invoice for healthcare services.
+List,Curated collection of references to resources.
+DocumentReference,Metadata about clinical documents.
+Composition,A set of resources assembled into a document.
+Bundle,A container for grouping resources in transactions.
+Questionnaire,Structured set of questions for data collection.
+QuestionnaireResponse,Answers to a questionnaire.
+Parameters,A set of parameters for operations.
+OperationOutcome,Response indicating success or error details.
+SearchParameter,Defines server search parameter capability.
+StructureDefinition,Defines constraints/profiles for resources.
+CapabilityStatement,Describes functionalities exposed by a FHIR server.
+ImplementationGuide,A guide for using FHIR in specific contexts.
+StructureMap,Defines mapping between resources/data.
+GraphDefinition,Describes graph of resources for queries.
+MessageDefinition,Defines messaging format and protocols.
+MessageHeader,Headers for messaging context.
+OperationDefinition,Defines custom operations available on resources.
+CompartmentDefinition,Defines compartments grouping resources by type.
+ExampleScenario,Illustrates workflows and resource sequences.
+GraphDefinition,Defines navigation across resource relationships.
+TerminologyCapabilities,Describes server terminology services.
+CodeSystem,Definition of codes used in data elements.
+ValueSet,Set of codes drawn from one or more CodeSystems.
+ConceptMap,Mapping between code systems.
+NamingSystem,Registry of identifier namespaces.
+Library,Reusable logic artifacts (e.g. decision support rules).
+Measure,Definition of a quality measure to evaluate care.
+MeasureReport,Result of executing a quality measure.
+MedicationKnowledge,Information about medication knowledge.
+EffectEvidenceSynthesis,Synthesis of clinical study evidence.
+RiskEvidenceSynthesis,Synthesis of risk evidence.

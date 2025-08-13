@@ -14,12 +14,17 @@ import 'services/backend_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/supabase_service.dart';
 import 'dart:async';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Load environment variables
+  await dotenv.load(fileName: ".env");
+  
   await Supabase.initialize(
-    url: 'https://ujsmgrtrwuyityzfjnkk.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqc21ncnRyd3V5aXR5emZqbmtrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI1OTY3MzksImV4cCI6MjA2ODE3MjczOX0.sa3SDHo0fQ5kLH18_A5WiXjCVPr-3v3JEJ_R3uN66wI',
+    url: dotenv.env['SUPABASE_URL'] ?? '',
+    anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
   );
   
   await Hive.initFlutter();
@@ -80,9 +85,10 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isLogin = true;
   String _error = '';
   bool _loading = false;
+  bool _showEmailConfirmation = false;
 
   Future<void> _submit() async {
-    setState(() { _loading = true; _error = ''; });
+    setState(() { _loading = true; _error = ''; _showEmailConfirmation = false; });
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
     try {
@@ -90,6 +96,19 @@ class _AuthScreenState extends State<AuthScreen> {
         await Supabase.instance.client.auth.signInWithPassword(email: email, password: password);
       } else {
         await Supabase.instance.client.auth.signUp(email: email, password: password);
+        // Show email confirmation message after successful sign up
+        setState(() { _showEmailConfirmation = true; });
+        // Auto-switch to sign in mode after a delay
+        Future.delayed(const Duration(seconds: 5), () {
+          if (mounted) {
+            setState(() { 
+              _isLogin = true; 
+              _showEmailConfirmation = false;
+              _emailController.clear();
+              _passwordController.clear();
+            });
+          }
+        });
       }
     } catch (e) {
       setState(() { _error = e.toString(); });
@@ -101,44 +120,236 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_isLogin ? 'Sign In' : 'Sign Up')),
+      backgroundColor: Colors.grey[50],
       body: Center(
         child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 400),
+            margin: const EdgeInsets.all(24.0),
+            padding: const EdgeInsets.all(32.0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // App branding/title
+                const Icon(
+                  Icons.quiz,
+                  size: 64,
+                  color: Colors.purpleAccent,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'UbiFlashcards',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.purpleAccent,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                
+                // Mode indicator with toggle buttons
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: _loading ? null : () => setState(() => _isLogin = true),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: _isLogin ? Colors.purpleAccent : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Sign In',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: _isLogin ? Colors.white : Colors.grey[600],
+                                fontWeight: _isLogin ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: _loading ? null : () => setState(() => _isLogin = false),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            decoration: BoxDecoration(
+                              color: !_isLogin ? Colors.purpleAccent : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Sign Up',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: !_isLogin ? Colors.white : Colors.grey[600],
+                                fontWeight: !_isLogin ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Show email confirmation message
+                if (_showEmailConfirmation)
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    margin: const EdgeInsets.only(bottom: 24),
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      border: Border.all(color: Colors.green[200]!),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      children: [
+                        const Icon(Icons.email, color: Colors.green, size: 32),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Check Your Email!',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'We\'ve sent a confirmation link to ${_emailController.text.trim()}. Please check your email and click the link to activate your account.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.green[700],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Switching to Sign In mode in a few seconds...',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.green[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // Form fields
                 TextField(
                   controller: _emailController,
-                  decoration: const InputDecoration(labelText: 'Email'),
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    prefixIcon: const Icon(Icons.email_outlined),
+                  ),
                   keyboardType: TextInputType.emailAddress,
+                  enabled: !_loading,
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _passwordController,
-                  decoration: const InputDecoration(labelText: 'Password'),
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    prefixIcon: const Icon(Icons.lock_outlined),
+                  ),
                   obscureText: true,
+                  enabled: !_loading,
                 ),
                 const SizedBox(height: 24),
+
+                // Error message
                 if (_error.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Text(_error, style: const TextStyle(color: Colors.red)),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.red[50],
+                      border: Border.all(color: Colors.red[200]!),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _error,
+                            style: const TextStyle(color: Colors.red, fontSize: 14),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+
+                // Submit button
                 SizedBox(
                   width: double.infinity,
+                  height: 48,
                   child: ElevatedButton(
                     onPressed: _loading ? null : _submit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.purpleAccent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
                     child: _loading
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : Text(_isLogin ? 'Sign In' : 'Sign Up'),
+                        ? const SizedBox(
+                            width: 20, 
+                            height: 20, 
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : Text(
+                            _isLogin ? 'Sign In' : 'Create Account',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
                   ),
                 ),
-                TextButton(
-                  onPressed: _loading ? null : () => setState(() => _isLogin = !_isLogin),
-                  child: Text(_isLogin ? 'Don\'t have an account? Sign Up' : 'Already have an account? Sign In'),
-                ),
+                
+                // Helper text
+                if (!_showEmailConfirmation) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    _isLogin 
+                        ? 'New to UbiFlashcards? Tap "Sign Up" above to create an account.'
+                        : 'Already have an account? Tap "Sign In" above to log in.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -163,6 +374,7 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
   late AnimationController _controller;
   late Animation<double> _animation;
   bool _randomOrder = false;
+  bool _reverseMode = false;
   List<int> _shuffledIndices = [];
   final Set<int> _seenIndices = {};
   String _errorMessage = '';
@@ -291,6 +503,14 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
         _seenIndices.clear();
         _currentIndex = 0;
       }
+      _showAnswer = false;
+      _controller.reset();
+    });
+  }
+
+  void _onReverseModeChanged(bool value) {
+    setState(() {
+      _reverseMode = value;
       _showAnswer = false;
       _controller.reset();
     });
@@ -647,6 +867,12 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                     onChanged: (val) => _onRandomOrderChanged(val ?? false),
                   ),
                   const Text('Random order'),
+                  const SizedBox(width: 24),
+                  Checkbox(
+                    value: _reverseMode,
+                    onChanged: (val) => _onReverseModeChanged(val ?? false),
+                  ),
+                  const Text('Reverse Cards'),
                 ],
               ),
             ],
@@ -1028,6 +1254,12 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                             onChanged: (val) => _onRandomOrderChanged(val ?? false),
                           ),
                           const Text('Random order'),
+                          const SizedBox(width: 24),
+                          Checkbox(
+                            value: _reverseMode,
+                            onChanged: (val) => _onReverseModeChanged(val ?? false),
+                          ),
+                          const Text('Show answers first'),
                         ],
                       ),
                     ],
@@ -1070,9 +1302,9 @@ class _MyHomePageState extends State<MyHomePage> with SingleTickerProviderStateM
                         animation: _animation,
                         builder: (context, child) {
                           final isUnder = (_animation.value > 0.5);
-                          final displayText = isUnder
-                              ? flashcard.answer
-                              : flashcard.question;
+                          final displayText = _reverseMode
+                              ? (isUnder ? flashcard.question : flashcard.answer)
+                              : (isUnder ? flashcard.answer : flashcard.question);
                           return Transform(
                             alignment: Alignment.center,
                             transform: Matrix4.rotationY(pi * _animation.value),
